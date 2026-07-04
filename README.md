@@ -63,7 +63,7 @@ py -3.12 -m venv .venv
 .\tools\build_css.ps1
 
 # 3. Run in development (starts server + opens browser)
-.\.venv\Scripts\python.exe run.py
+.\.venv\Scripts\python.exe main.py
 ```
 
 The dev server writes `/data` in the repo root (git-ignored). First visit to

@@ -81,5 +81,31 @@
     {% endif %}
   </table>
 </div>
+
+<div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+  <h2 class="px-4 pt-4 text-lg font-semibold text-slate-900">Weekly hours by employee</h2>
+  <table class="min-w-full divide-y divide-slate-200 text-sm">
+    <thead class="bg-slate-50 text-left text-slate-500">
+      <tr>
+        <th class="px-4 py-3 font-medium">Employee</th>
+        <th class="px-4 py-3 font-medium">Week starting</th>
+        <th class="px-4 py-3 font-medium text-right">Hours</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for r in rows %}
+        {% for wh in r.weekly_hours %}
+        <tr>
+          <td class="px-4 py-3 font-medium text-slate-900">{{ r.name }}</td>
+          <td class="px-4 py-3">{{ wh.week_start }}</td>
+          <td class="px-4 py-3 text-right">{{ '%.2f'|format(wh.hours) }}</td>
+        </tr>
+        {% endfor %}
+      {% else %}
+      <tr><td colspan="3" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
 {% endif %}
 {% endblock %}

@@ -23,6 +23,12 @@ from .timeutil import iso_year_week, parse_iso, week_start_for
 
 
 @dataclass
+class WeeklyHours:
+    week_start: date
+    hours: float
+
+
+@dataclass
 class PayrollRow:
     employee_id: str
     name: str
@@ -34,6 +40,8 @@ class PayrollRow:
     total_pay: float = 0.0
     open_shift_count: int = 0          # open shifts in range, excluded from totals
     below_min_wage: bool = False
+    # Total worked hours per work-week, sorted by week_start ascending.
+    weekly_hours: list[WeeklyHours] = field(default_factory=list)
     # work-week-start -> break-adjusted worked hours (intermediate accumulator)
     _week_hours: dict[date, float] = field(default_factory=dict)
 
@@ -121,6 +129,11 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
     # Split each work-week's hours into regular vs overtime, then price it.
     ot = settings.overtime
     for row in rows.values():
+        row.weekly_hours = sorted(
+            (WeeklyHours(week_start=ws, hours=round(hours, 2))
+             for ws, hours in row._week_hours.items()),
+            key=lambda wh: wh.week_start,
+        )
         for _week_start, hours in row._week_hours.items():
             if ot.enabled and hours > ot.weekly_threshold:
                 overtime_h = hours - ot.weekly_threshold
@@ -168,6 +181,13 @@ def to_csv(rows: list[PayrollRow], start: date, end: date) -> str:
             f"{r.total_pay:.2f}",
             "; ".join(flags),
         ])
+    writer.writerow([])
+    writer.writerow(["Weekly hours by employee"])
+    writer.writerow(["Employee", "Week starting", "Hours"])
+    for r in rows:
+        for wh in r.weekly_hours:
+            writer.writerow([r.name, wh.week_start.isoformat(), f"{wh.hours:.2f}"])
+
     writer.writerow([])
     writer.writerow([
         "These are configurable estimates, not legal or payroll advice. "
