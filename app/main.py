@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import paths, security, storage
+from . import datainfo, paths, security, storage
 from .deps import _RedirectException, redirect
 from .routes import admin as admin_routes
 from .routes import kiosk as kiosk_routes
@@ -29,8 +29,9 @@ PREFERRED_PORTS = [8765, 8766, 8767, 8000, 8080]
 
 
 def create_app() -> FastAPI:
-    # Make sure /data exists so the secret + files can be written.
+    # Make sure /data exists (next to the exe) and document its schema.
     storage.ensure_dir(paths.data_dir())
+    datainfo.ensure_data_readme()
 
     app = FastAPI(title="Employee Shift Tracker", docs_url=None, redoc_url=None)
 
