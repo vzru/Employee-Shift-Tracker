@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Hide Alpine-managed elements until Alpine initializes, preventing a flash of
+   modal/edit UI before JS runs. */
+[x-cloak] {
+  display: none !important;
+}

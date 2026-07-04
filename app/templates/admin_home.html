@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+{% block content %}
+<h1 class="text-2xl font-bold text-slate-900">Admin panel</h1>
+
+<div class="mt-4 grid gap-4 sm:grid-cols-3">
+  <div class="rounded-xl border border-slate-200 bg-white p-5">
+    <div class="text-3xl font-bold text-slate-900">{{ employee_count }}</div>
+    <div class="text-sm text-slate-500">Active employees</div>
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-5">
+    <div class="text-3xl font-bold text-emerald-600">{{ clocked_in_count }}</div>
+    <div class="text-sm text-slate-500">Currently clocked in</div>
+  </div>
+  <div class="rounded-xl border border-slate-200 bg-white p-5">
+    <div class="text-3xl font-bold {% if below_min_wage %}text-red-600{% else %}text-slate-900{% endif %}">{{ below_min_wage|length }}</div>
+    <div class="text-sm text-slate-500">Below min wage (${{ '%.2f'|format(min_wage) }})</div>
+  </div>
+</div>
+
+{% if below_min_wage %}
+<div class="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+  <strong>Warning:</strong> the following active employees have a pay rate below the minimum wage:
+  {{ below_min_wage | map(attribute='name') | join(', ') }}.
+</div>
+{% endif %}
+
+<div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+  <a href="/admin/employees" class="rounded-xl border border-slate-200 bg-white p-5 hover:border-indigo-300 hover:shadow-sm">
+    <div class="font-semibold text-slate-900">Employees</div>
+    <div class="text-sm text-slate-500">Add, edit, remove &amp; set pay rates</div>
+  </a>
+  <a href="/admin/shifts" class="rounded-xl border border-slate-200 bg-white p-5 hover:border-indigo-300 hover:shadow-sm">
+    <div class="font-semibold text-slate-900">Shifts</div>
+    <div class="text-sm text-slate-500">View &amp; correct entries, flag open shifts</div>
+  </a>
+  <a href="/admin/payroll" class="rounded-xl border border-slate-200 bg-white p-5 hover:border-indigo-300 hover:shadow-sm">
+    <div class="font-semibold text-slate-900">Payroll export</div>
+    <div class="text-sm text-slate-500">Hours &amp; pay CSV for a date range</div>
+  </a>
+  <a href="/admin/settings" class="rounded-xl border border-slate-200 bg-white p-5 hover:border-indigo-300 hover:shadow-sm">
+    <div class="font-semibold text-slate-900">Settings</div>
+    <div class="text-sm text-slate-500">Ontario payroll rules</div>
+  </a>
+</div>
+{% endblock %}

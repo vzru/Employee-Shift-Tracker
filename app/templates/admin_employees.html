@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Employees{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between">
+  <h1 class="text-2xl font-bold text-slate-900">Employees</h1>
+  <a href="/admin" class="text-sm text-indigo-600 hover:underline">&larr; Back to admin</a>
+</div>
+
+<!-- Add employee -->
+<div class="mt-4 rounded-xl border border-slate-200 bg-white p-5">
+  <h2 class="font-semibold text-slate-900">Add employee</h2>
+  <form method="post" action="/admin/employees/add" class="mt-3 grid gap-3 sm:grid-cols-4 sm:items-end">
+    <label class="block sm:col-span-2">
+      <span class="text-sm font-medium text-slate-700">Name</span>
+      <input type="text" name="name" required
+             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
+    </label>
+    <label class="block">
+      <span class="text-sm font-medium text-slate-700">Hourly rate ($)</span>
+      <input type="number" name="hourly_rate" step="0.01" min="0" value="17.60"
+             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
+    </label>
+    <label class="flex items-center gap-2 pb-2">
+      <input type="checkbox" name="active" checked class="rounded border-slate-300 text-indigo-600">
+      <span class="text-sm text-slate-700">Active</span>
+    </label>
+    <div class="sm:col-span-4">
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Add</button>
+    </div>
+  </form>
+</div>
+
+<!-- Employee list -->
+<div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+  <table class="min-w-full divide-y divide-slate-200 text-sm">
+    <thead class="bg-slate-50 text-left text-slate-500">
+      <tr>
+        <th class="px-4 py-3 font-medium">Name</th>
+        <th class="px-4 py-3 font-medium">Hourly rate</th>
+        <th class="px-4 py-3 font-medium">Status</th>
+        <th class="px-4 py-3 font-medium text-right">Actions</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for e in employees %}
+      <tr x-data="{ editing: false }">
+        <!-- Display cells (hidden while editing; the edit form spans the row) -->
+        <td class="px-4 py-3 font-medium text-slate-900" x-show="!editing">{{ e.name }}</td>
+        <td class="px-4 py-3" x-show="!editing">
+          <span class="{% if e.hourly_rate < min_wage %}text-red-600 font-semibold{% else %}text-slate-700{% endif %}">
+            ${{ '%.2f'|format(e.hourly_rate) }}
+          </span>
+          {% if e.hourly_rate < min_wage %}<span class="ml-1 text-xs text-red-500">(below min)</span>{% endif %}
+        </td>
+        <td class="px-4 py-3" x-show="!editing">
+          {% if e.active %}
+            <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Active</span>
+          {% else %}
+            <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Inactive</span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-right" x-show="!editing">
+          <button @click="editing = true" class="text-indigo-600 hover:underline">Edit</button>
+          <form method="post" action="/admin/employees/{{ e.id }}/delete" class="inline"
+                onsubmit="return confirm('Remove {{ e.name }}? This does not delete their past shift records.');">
+            <button type="submit" class="ml-3 text-red-600 hover:underline">Remove</button>
+          </form>
+        </td>
+
+        <!-- Edit form spanning the row -->
+        <td colspan="4" class="px-4 py-3" x-show="editing" x-cloak>
+          <form method="post" action="/admin/employees/{{ e.id }}/edit"
+                class="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <label class="block sm:col-span-2">
+              <span class="text-xs font-medium text-slate-500">Name</span>
+              <input type="text" name="name" value="{{ e.name }}" required
+                     class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+            </label>
+            <label class="block">
+              <span class="text-xs font-medium text-slate-500">Hourly rate ($)</span>
+              <input type="number" name="hourly_rate" step="0.01" min="0" value="{{ '%.2f'|format(e.hourly_rate) }}"
+                     class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+            </label>
+            <label class="flex items-center gap-2 pb-2">
+              <input type="checkbox" name="active" {% if e.active %}checked{% endif %} class="rounded border-slate-300 text-indigo-600">
+              <span class="text-sm text-slate-700">Active</span>
+            </label>
+            <div class="sm:col-span-4 flex gap-2">
+              <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Save</button>
+              <button type="button" @click="editing = false" class="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+            </div>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" class="px-4 py-6 text-center text-slate-400">No employees yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

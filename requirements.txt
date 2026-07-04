@@ -1,0 +1,16 @@
+# Employee Shift Tracker — runtime dependencies
+# Pinned for reproducible PyInstaller builds. Install into the venv with:
+#   .venv\Scripts\python.exe -m pip install -r requirements.txt
+
+fastapi==0.115.6          # web framework
+uvicorn==0.34.0           # ASGI server (run programmatically on startup)
+jinja2==3.1.5             # HTML templating
+python-multipart==0.0.20  # parse HTML form POSTs
+passlib==1.7.4            # password hashing API
+bcrypt==4.0.1             # bcrypt backend for passlib (4.0.1 avoids the passlib
+                          # 1.7.4 "__about__" version-read warning seen on 4.1+)
+itsdangerous==2.2.0       # signed session cookies (Starlette SessionMiddleware)
+pydantic==2.10.5          # data models / validation
+
+# Build-time only (not imported by the app; used to produce the .exe)
+pyinstaller==6.11.1

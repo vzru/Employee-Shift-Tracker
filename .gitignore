@@ -1,0 +1,31 @@
+# ---------------------------------------------------------------------------
+# CRITICAL: never commit real payroll data. The app writes employee names and
+# hours into /data next to the .exe. This repo is PUBLIC.
+# ---------------------------------------------------------------------------
+/data/
+data/
+
+# Python virtual environment
+.venv/
+venv/
+
+# Python bytecode caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# PyInstaller build artifacts
+/build/
+/dist/
+*.manifest
+# NOTE: we keep the committed .spec file, so do NOT ignore *.spec
+
+# Standalone Tailwind CLI binary (downloaded per-machine, ~100 MB)
+/tools/tailwindcss.exe
+
+# OS / editor cruft
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.log

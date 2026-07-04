@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Admin Login{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-md">
+  <div class="rounded-2xl bg-white p-8 shadow-sm border border-slate-200">
+    <h1 class="text-xl font-bold text-slate-900">Admin login</h1>
+    <p class="mt-1 text-sm text-slate-500">Enter the admin password to continue.</p>
+    {% if err %}<div class="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-800">{{ err }}</div>{% endif %}
+    <form method="post" action="/admin/login" class="mt-6 space-y-4">
+      <label class="block">
+        <span class="text-sm font-medium text-slate-700">Password</span>
+        <input type="password" name="password" required autofocus
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
+      </label>
+      <button type="submit" class="w-full rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">
+        Log in
+      </button>
+    </form>
+    <p class="mt-4 text-xs text-slate-400">
+      Forgot it? Run <code class="rounded bg-slate-100 px-1">EmployeeShiftTracker.exe --reset-admin</code>
+      in a terminal on this PC.
+    </p>
+  </div>
+</div>
+{% endblock %}

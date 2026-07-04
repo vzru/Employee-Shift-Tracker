@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Employee Shift Tracker{% endblock %}</title>
+  <!-- Built Tailwind stylesheet (produced by the standalone Tailwind CLI). -->
+  <link rel="stylesheet" href="/static/css/tailwind.css">
+  <!-- Vendored Alpine.js (offline, no CDN). defer so it runs after DOM parse. -->
+  <script defer src="/static/js/alpine.min.js"></script>
+</head>
+<body class="h-full bg-slate-100 text-slate-800">
+  <div class="min-h-full">
+    {% block nav %}
+    <header class="bg-slate-900 text-white shadow">
+      <div class="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+        <a href="/" class="flex items-center gap-2 font-semibold text-lg">
+          <span class="inline-block h-2.5 w-2.5 rounded-full bg-emerald-400"></span>
+          Shift Tracker
+        </a>
+        <nav class="flex items-center gap-4 text-sm">
+          <a href="/" class="hover:text-emerald-300">Kiosk</a>
+          {% if request.session.get('admin_authed') %}
+            <a href="/admin" class="hover:text-emerald-300">Admin</a>
+            <a href="/admin/logout" class="rounded bg-slate-700 px-3 py-1 hover:bg-slate-600">Log out</a>
+          {% else %}
+            <a href="/admin" class="rounded bg-indigo-600 px-3 py-1 hover:bg-indigo-500">Admin</a>
+          {% endif %}
+        </nav>
+      </div>
+    </header>
+    {% endblock %}
+
+    <main class="mx-auto max-w-6xl px-4 py-6">
+      {# Flash messages via ?ok= / ?err= query params #}
+      {% if ok %}
+        <div class="mb-4 rounded-lg border border-emerald-300 bg-emerald-50 px-4 py-3 text-emerald-800">
+          {{ ok }}
+        </div>
+      {% endif %}
+      {% if err %}
+        <div class="mb-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-800">
+          {{ err }}
+        </div>
+      {% endif %}
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="mx-auto max-w-6xl px-4 py-6 text-xs text-slate-400">
+      Employee Shift Tracker — local payroll estimates only, not legal or payroll advice.
+    </footer>
+  </div>
+</body>
+</html>

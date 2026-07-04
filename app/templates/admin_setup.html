@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Set Admin Password{% endblock %}
+{% block content %}
+<div class="mx-auto max-w-md">
+  <div class="rounded-2xl bg-white p-8 shadow-sm border border-slate-200">
+    <h1 class="text-xl font-bold text-slate-900">Welcome — set an admin password</h1>
+    <p class="mt-1 text-sm text-slate-500">
+      This is the first launch. Create the admin password used to manage employees,
+      shifts, and payroll settings. Keep it safe — recover it later with the
+      <code class="rounded bg-slate-100 px-1">--reset-admin</code> command.
+    </p>
+    {% if err %}<div class="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-2 text-sm text-red-800">{{ err }}</div>{% endif %}
+    <form method="post" action="/admin/setup" class="mt-6 space-y-4">
+      <label class="block">
+        <span class="text-sm font-medium text-slate-700">Password</span>
+        <input type="password" name="password" required minlength="6"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-slate-700">Confirm password</span>
+        <input type="password" name="confirm" required minlength="6"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
+      </label>
+      <button type="submit" class="w-full rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">
+        Set password &amp; continue
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}
