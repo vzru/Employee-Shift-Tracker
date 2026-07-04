@@ -8,11 +8,11 @@ from __future__ import annotations
 from . import paths, storage
 
 DATA_README = """\
-# Data folder — Employee Shift Tracker
+# Data folder - Employee Shift Tracker
 
 This folder holds all of your live payroll data as plain, human-readable JSON.
 It lives NEXT TO the application (the .exe) and persists between runs. Everything
-here is usable without the app — you can open the files in any text editor.
+here is usable without the app - you can open the files in any text editor.
 
 Back up your data by copying this entire `data` folder somewhere safe.
 
@@ -25,7 +25,7 @@ An array of employees. Employee NAMES are stored ONLY in this file.
     ]
 
 ### admin.json
-The admin password hash (bcrypt — never plaintext) and the payroll settings
+The admin password hash (bcrypt - never plaintext) and the payroll settings
 (break deduction, overtime, minimum wage). Do not edit the hash by hand; reset
 the password with:  EmployeeShiftTracker.exe --reset-admin
 
@@ -36,7 +36,7 @@ Keep it private. Deleting it just logs admins out.
 ### <YYYY>/week-<WW>/shifts.json
 Shifts are organised by ISO 8601 week. Weeks start on MONDAY and the week number
 (01-53) is zero-padded. The ISO year can differ from the calendar year for a few
-days around January 1 — that is correct ISO behaviour.
+days around January 1 - that is correct ISO behaviour.
 
 Each shift stores IDs only (never the name):
     [
