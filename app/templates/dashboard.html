@@ -13,33 +13,47 @@
     </div>
   </div>
 
-  {% if rows %}
-  <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-    {% for row in rows %}
-    <button type="button"
-      @click='select({
-        id: {{ row.id | tojson }},
-        name: {{ row.name | tojson }},
-        clocked_in: {{ row.clocked_in | tojson }},
-        since: {{ (row.since or "") | tojson }}
-      })'
-      class="group flex items-center justify-between rounded-xl border bg-white px-5 py-4 text-left shadow-sm transition
-             hover:shadow-md hover:border-indigo-300
-             {% if row.clocked_in %}border-emerald-300 ring-1 ring-emerald-200{% else %}border-slate-200{% endif %}">
-      <div class="flex items-center gap-3">
-        <span class="inline-block h-3 w-3 rounded-full {% if row.clocked_in %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
-        <span class="font-medium text-slate-900">{{ row.name }}</span>
+  {% if sections %}
+  <div class="space-y-8">
+    {% for section in sections %}
+    <div>
+      <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">{{ section.department }}</h2>
+      <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {% for card in section.cards %}
+        <button type="button"
+          {% if card.blocked %}disabled title="Already clocked in elsewhere"{% endif %}
+          @click='select({
+            employee_id: {{ card.employee_id | tojson }},
+            role_id: {{ card.role_id | tojson }},
+            name: {{ card.name | tojson }},
+            role_title: {{ card.role_title | tojson }},
+            department: {{ card.department | tojson }},
+            clocked_in: {{ card.clocked_in | tojson }},
+            since: {{ (card.since or "") | tojson }}
+          })'
+          class="group flex items-center justify-between rounded-xl border bg-white px-5 py-4 text-left shadow-sm transition
+                 {% if card.blocked %}opacity-40 cursor-not-allowed{% else %}hover:shadow-md hover:border-indigo-300{% endif %}
+                 {% if card.clocked_in %}border-emerald-300 ring-1 ring-emerald-200{% else %}border-slate-200{% endif %}">
+          <div class="flex items-center gap-3">
+            <span class="inline-block h-3 w-3 rounded-full {% if card.clocked_in %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
+            <div>
+              <div class="font-medium text-slate-900">{{ card.name }}</div>
+              <div class="text-xs text-slate-500">{{ card.role_title }}</div>
+            </div>
+          </div>
+          <span class="text-xs font-semibold uppercase tracking-wide
+                       {% if card.clocked_in %}text-emerald-600{% else %}text-slate-400{% endif %}">
+            {% if card.clocked_in %}In{% else %}Out{% endif %}
+          </span>
+        </button>
+        {% endfor %}
       </div>
-      <span class="text-xs font-semibold uppercase tracking-wide
-                   {% if row.clocked_in %}text-emerald-600{% else %}text-slate-400{% endif %}">
-        {% if row.clocked_in %}In{% else %}Out{% endif %}
-      </span>
-    </button>
+    </div>
     {% endfor %}
   </div>
   {% else %}
   <div class="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
-    No active employees yet. An admin can add them in the
+    No active employees with a role yet. An admin can add them in the
     <a href="/admin" class="text-indigo-600 underline">Admin panel</a>.
   </div>
   {% endif %}
@@ -50,7 +64,8 @@
        @keydown.escape.window="open = false">
     <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl" @click.outside="open = false">
       <h2 class="text-lg font-semibold text-slate-900"
-          x-text="emp.clocked_in ? 'Clock out ' + emp.name : 'Clock in ' + emp.name"></h2>
+          x-text="(emp.clocked_in ? 'Clock out ' : 'Clock in ') + emp.name"></h2>
+      <p class="text-sm text-slate-500" x-text="emp.role_title + ' — ' + emp.department"></p>
 
       <p class="mt-1 text-sm" x-show="emp.clocked_in">
         <span class="text-slate-500">Clocked in since:</span>
@@ -58,7 +73,8 @@
       </p>
 
       <form method="post" action="/clock" class="mt-4 space-y-4" @submit="if (!canSubmit) $event.preventDefault()">
-        <input type="hidden" name="employee_id" :value="emp.id">
+        <input type="hidden" name="employee_id" :value="emp.employee_id">
+        <input type="hidden" name="role_id" :value="emp.role_id">
         <input type="hidden" name="timestamp" :value="timestamp">
 
         <div>
@@ -71,8 +87,8 @@
               <template x-for="h in 12" :key="h"><option :value="h" x-text="h"></option></template>
             </select>
             <select x-model.number="minute" class="rounded-lg border border-slate-300 px-2 py-2 focus:border-indigo-500 focus:ring-indigo-500">
-              <template x-for="m in 60" :key="m - 1">
-                <option :value="m - 1" x-text="String(m - 1).padStart(2, '0')"></option>
+              <template x-for="m in 12" :key="(m - 1) * 5">
+                <option :value="(m - 1) * 5" x-text="String((m - 1) * 5).padStart(2, '0')"></option>
               </template>
             </select>
             <select x-model="ampm" class="rounded-lg border border-slate-300 px-2 py-2 focus:border-indigo-500 focus:ring-indigo-500">
@@ -116,7 +132,7 @@
   function kiosk() {
     return {
       open: false,
-      emp: { id: '', name: '', clocked_in: false, since: '' },
+      emp: { employee_id: '', role_id: '', name: '', role_title: '', department: '', clocked_in: false, since: '' },
       date: '',
       hour: 12,
       minute: 0,
@@ -133,7 +149,10 @@
 
       setFromValue(value) {
         const [d, t] = value.split('T');
-        const [hh, mm] = t.split(':').map(Number);
+        let [hh, mm] = t.split(':').map(Number);
+        // Round to the nearest 5-minute option the selector offers.
+        mm = Math.round(mm / 5) * 5;
+        if (mm === 60) { mm = 0; hh = (hh + 1) % 24; }
         this.date = d;
         this.ampm = hh >= 12 ? 'PM' : 'AM';
         this.hour = hh % 12 === 0 ? 12 : hh % 12;

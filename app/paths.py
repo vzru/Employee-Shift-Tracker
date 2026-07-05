@@ -19,6 +19,7 @@ In development (not frozen) both resolve relative to the project root.
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 
@@ -77,10 +78,14 @@ def admin_file() -> Path:
     return data_dir() / "admin.json"
 
 
-def week_dir(iso_year: int, iso_week: int) -> Path:
-    """/data/<YYYY>/week-<WW> with WW zero-padded to 2 digits."""
-    return data_dir() / f"{iso_year:04d}" / f"week-{iso_week:02d}"
+def week_dir(week_start: date) -> Path:
+    """
+    /data/<YYYY>/week-<YYYY-MM-DD>, keyed by the work week's start date (see
+    ``timeutil.week_start_for``). The year folder uses ``week_start``'s year,
+    even for a week that runs into the next calendar year.
+    """
+    return data_dir() / f"{week_start.year:04d}" / f"week-{week_start.isoformat()}"
 
 
-def shifts_file(iso_year: int, iso_week: int) -> Path:
-    return week_dir(iso_year, iso_week) / "shifts.json"
+def shifts_file(week_start: date) -> Path:
+    return week_dir(week_start) / "shifts.json"

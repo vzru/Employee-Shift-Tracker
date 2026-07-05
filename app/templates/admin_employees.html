@@ -7,24 +7,59 @@
 </div>
 
 <!-- Add employee -->
-<div class="mt-4 rounded-xl border border-slate-200 bg-white p-5">
+<div class="mt-4 rounded-xl border border-slate-200 bg-white p-5" x-data="rolesEditor([], {{ role_catalog | tojson }})">
   <h2 class="font-semibold text-slate-900">Add employee</h2>
-  <form method="post" action="/admin/employees/add" class="mt-3 grid gap-3 sm:grid-cols-4 sm:items-end">
-    <label class="block sm:col-span-2">
-      <span class="text-sm font-medium text-slate-700">Name</span>
-      <input type="text" name="name" required
+  {% if not role_catalog %}
+  <p class="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+    No departments/roles are defined yet. Add some in
+    <a href="/admin/settings" class="underline">Admin &gt; Settings</a> first.
+  </p>
+  {% endif %}
+  <form method="post" action="/admin/employees/add" class="mt-3 grid gap-3 sm:grid-cols-5 sm:items-end">
+    <label class="block">
+      <span class="text-sm font-medium text-slate-700">First name</span>
+      <input type="text" name="first_name" required
              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
     </label>
     <label class="block">
-      <span class="text-sm font-medium text-slate-700">Hourly rate ($)</span>
-      <input type="number" name="hourly_rate" step="0.01" min="0" value="17.60"
+      <span class="text-sm font-medium text-slate-700">Last name</span>
+      <input type="text" name="last_name" required
              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
     </label>
-    <label class="flex items-center gap-2 pb-2">
+    <label class="flex items-center gap-2 pb-2 sm:col-span-2">
       <input type="checkbox" name="active" checked class="rounded border-slate-300 text-indigo-600">
       <span class="text-sm text-slate-700">Active</span>
     </label>
-    <div class="sm:col-span-4">
+
+    <div class="sm:col-span-5">
+      <span class="text-sm font-medium text-slate-700">Roles</span>
+      <p class="text-xs text-slate-400">Each role has its own department and pay rate. An employee needs at least one.</p>
+      <div class="mt-1 space-y-2">
+        <template x-for="(role, i) in roles" :key="i">
+          <div class="flex flex-wrap items-center gap-2">
+            <select x-model="role.department" required
+                    class="min-w-[8rem] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+              <option value="" disabled>Department</option>
+              <template x-for="d in departmentOptionsFor(role)" :key="d"><option :value="d" x-text="d"></option></template>
+            </select>
+            <select x-model="role.title" required
+                    class="min-w-[8rem] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+              <option value="" disabled>Role title</option>
+              <template x-for="t in titleOptionsFor(role)" :key="t"><option :value="t" x-text="t"></option></template>
+            </select>
+            <span class="text-sm text-slate-400">$</span>
+            <input type="number" x-model.number="role.hourly_rate" step="0.01" min="0" placeholder="Rate"
+                   class="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+            <button type="button" @click="removeRole(i)" x-show="roles.length > 1"
+                    class="text-sm text-red-500 hover:underline">Remove</button>
+          </div>
+        </template>
+        <button type="button" @click="addRole()" class="text-sm text-indigo-600 hover:underline">+ Add another role</button>
+      </div>
+      <input type="hidden" name="roles_json" :value="rolesJson">
+    </div>
+
+    <div class="sm:col-span-5">
       <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Add</button>
     </div>
   </form>
@@ -36,30 +71,40 @@
     <thead class="bg-slate-50 text-left text-slate-500">
       <tr>
         <th class="px-4 py-3 font-medium">Name</th>
-        <th class="px-4 py-3 font-medium">Hourly rate</th>
+        <th class="px-4 py-3 font-medium">Roles</th>
         <th class="px-4 py-3 font-medium">Status</th>
         <th class="px-4 py-3 font-medium text-right">Actions</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-slate-100">
       {% for e in employees %}
-      <tr x-data="{ editing: false }">
+      <tr x-data="{ editing: false, ...rolesEditor({{ e.roles | tojson }}, {{ role_catalog | tojson }}) }">
         <!-- Display cells (hidden while editing; the edit form spans the row) -->
-        <td class="px-4 py-3 font-medium text-slate-900" x-show="!editing">{{ e.name }}</td>
+        <td class="px-4 py-3 font-medium text-slate-900 align-top" x-show="!editing">{{ e.name }}</td>
         <td class="px-4 py-3" x-show="!editing">
-          <span class="{% if e.hourly_rate < min_wage %}text-red-600 font-semibold{% else %}text-slate-700{% endif %}">
-            ${{ '%.2f'|format(e.hourly_rate) }}
-          </span>
-          {% if e.hourly_rate < min_wage %}<span class="ml-1 text-xs text-red-500">(below min)</span>{% endif %}
+          <ul class="space-y-0.5">
+            {% for role in e.roles %}
+            <li>
+              <span class="text-slate-700">{{ role.title }}</span>
+              <span class="text-slate-400">— {{ role.department }}</span>
+              <span class="{% if role.hourly_rate < min_wage %}font-semibold text-red-600{% else %}text-slate-700{% endif %}">
+                ${{ '%.2f'|format(role.hourly_rate) }}
+              </span>
+              {% if role.hourly_rate < min_wage %}<span class="text-xs text-red-500">(below min)</span>{% endif %}
+            </li>
+            {% else %}
+            <li class="text-slate-400">No roles</li>
+            {% endfor %}
+          </ul>
         </td>
-        <td class="px-4 py-3" x-show="!editing">
+        <td class="px-4 py-3 align-top" x-show="!editing">
           {% if e.active %}
             <span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Active</span>
           {% else %}
             <span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Inactive</span>
           {% endif %}
         </td>
-        <td class="px-4 py-3 text-right" x-show="!editing">
+        <td class="px-4 py-3 text-right align-top" x-show="!editing">
           <button @click="editing = true" class="text-indigo-600 hover:underline">Edit</button>
           <form method="post" action="/admin/employees/{{ e.id }}/delete" class="inline"
                 onsubmit="return confirm('Remove {{ e.name }}? This does not delete their past shift records.');">
@@ -70,22 +115,50 @@
         <!-- Edit form spanning the row -->
         <td colspan="4" class="px-4 py-3" x-show="editing" x-cloak>
           <form method="post" action="/admin/employees/{{ e.id }}/edit"
-                class="grid gap-3 sm:grid-cols-4 sm:items-end">
-            <label class="block sm:col-span-2">
-              <span class="text-xs font-medium text-slate-500">Name</span>
-              <input type="text" name="name" value="{{ e.name }}" required
+                class="grid gap-3 sm:grid-cols-5 sm:items-end">
+            <label class="block">
+              <span class="text-xs font-medium text-slate-500">First name</span>
+              <input type="text" name="first_name" value="{{ e.first_name }}" required
                      class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             </label>
             <label class="block">
-              <span class="text-xs font-medium text-slate-500">Hourly rate ($)</span>
-              <input type="number" name="hourly_rate" step="0.01" min="0" value="{{ '%.2f'|format(e.hourly_rate) }}"
+              <span class="text-xs font-medium text-slate-500">Last name</span>
+              <input type="text" name="last_name" value="{{ e.last_name }}" required
                      class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             </label>
-            <label class="flex items-center gap-2 pb-2">
+            <label class="flex items-center gap-2 pb-2 sm:col-span-2">
               <input type="checkbox" name="active" {% if e.active %}checked{% endif %} class="rounded border-slate-300 text-indigo-600">
               <span class="text-sm text-slate-700">Active</span>
             </label>
-            <div class="sm:col-span-4 flex gap-2">
+
+            <div class="sm:col-span-5">
+              <span class="text-xs font-medium text-slate-500">Roles</span>
+              <div class="mt-1 space-y-2">
+                <template x-for="(role, i) in roles" :key="i">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <select x-model="role.department" required
+                            class="min-w-[8rem] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                      <option value="" disabled>Department</option>
+                      <template x-for="d in departmentOptionsFor(role)" :key="d"><option :value="d" x-text="d"></option></template>
+                    </select>
+                    <select x-model="role.title" required
+                            class="min-w-[8rem] flex-1 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                      <option value="" disabled>Role title</option>
+                      <template x-for="t in titleOptionsFor(role)" :key="t"><option :value="t" x-text="t"></option></template>
+                    </select>
+                    <span class="text-sm text-slate-400">$</span>
+                    <input type="number" x-model.number="role.hourly_rate" step="0.01" min="0" placeholder="Rate"
+                           class="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                    <button type="button" @click="removeRole(i)" x-show="roles.length > 1"
+                            class="text-sm text-red-500 hover:underline">Remove</button>
+                  </div>
+                </template>
+                <button type="button" @click="addRole()" class="text-sm text-indigo-600 hover:underline">+ Add another role</button>
+              </div>
+              <input type="hidden" name="roles_json" :value="rolesJson">
+            </div>
+
+            <div class="sm:col-span-5 flex gap-2">
               <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Save</button>
               <button type="button" @click="editing = false" class="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
             </div>
@@ -98,4 +171,37 @@
     </tbody>
   </table>
 </div>
+
+<script>
+  function rolesEditor(initialRoles, catalog) {
+    return {
+      catalog: catalog || {},
+      roles: (initialRoles && initialRoles.length)
+        ? initialRoles.map(r => ({ id: r.id, title: r.title, department: r.department, hourly_rate: r.hourly_rate }))
+        : [{ id: null, title: '', department: '', hourly_rate: '' }],
+      addRole() {
+        this.roles.push({ id: null, title: '', department: '', hourly_rate: '' });
+      },
+      removeRole(i) {
+        if (this.roles.length > 1) this.roles.splice(i, 1);
+      },
+      // Always include the role's CURRENT value even if it's since been
+      // removed from the catalog, so existing employee data still displays
+      // (and won't silently change) until the admin picks something new.
+      departmentOptionsFor(role) {
+        const depts = Object.keys(this.catalog).sort();
+        if (role.department && !depts.includes(role.department)) return [role.department, ...depts];
+        return depts;
+      },
+      titleOptionsFor(role) {
+        const titles = this.catalog[role.department] || [];
+        if (role.title && !titles.includes(role.title)) return [role.title, ...titles];
+        return titles;
+      },
+      get rolesJson() {
+        return JSON.stringify(this.roles.filter(r => (r.title || '').trim() && (r.department || '').trim()));
+      },
+    };
+  }
+</script>
 {% endblock %}

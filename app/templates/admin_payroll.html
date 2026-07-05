@@ -39,7 +39,6 @@
         <th class="px-4 py-3 font-medium">Employee</th>
         <th class="px-4 py-3 font-medium text-right">Regular hrs</th>
         <th class="px-4 py-3 font-medium text-right">OT hrs</th>
-        <th class="px-4 py-3 font-medium text-right">Rate</th>
         <th class="px-4 py-3 font-medium text-right">Regular pay</th>
         <th class="px-4 py-3 font-medium text-right">OT pay</th>
         <th class="px-4 py-3 font-medium text-right">Total pay</th>
@@ -52,17 +51,16 @@
         <td class="px-4 py-3 font-medium text-slate-900">{{ r.name }}</td>
         <td class="px-4 py-3 text-right">{{ '%.2f'|format(r.regular_hours) }}</td>
         <td class="px-4 py-3 text-right">{{ '%.2f'|format(r.overtime_hours) }}</td>
-        <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.pay_rate) }}</td>
         <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.regular_pay) }}</td>
         <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.overtime_pay) }}</td>
         <td class="px-4 py-3 text-right font-semibold">${{ '%.2f'|format(r.total_pay) }}</td>
         <td class="px-4 py-3 text-xs">
           {% if r.open_shift_count %}<span class="text-amber-700">{{ r.open_shift_count }} open excluded</span><br>{% endif %}
-          {% if r.below_min_wage %}<span class="text-red-600">below min wage</span>{% endif %}
+          {% if r.below_min_wage %}<span class="text-red-600">a role is below min wage</span>{% endif %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="8" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
+      <tr><td colspan="7" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
       {% endfor %}
     </tbody>
     {% if totals %}
@@ -71,7 +69,6 @@
         <td class="px-4 py-3">Totals</td>
         <td class="px-4 py-3 text-right">{{ '%.2f'|format(totals.regular_hours) }}</td>
         <td class="px-4 py-3 text-right">{{ '%.2f'|format(totals.overtime_hours) }}</td>
-        <td class="px-4 py-3"></td>
         <td class="px-4 py-3"></td>
         <td class="px-4 py-3"></td>
         <td class="px-4 py-3 text-right">${{ '%.2f'|format(totals.total_pay) }}</td>
@@ -103,6 +100,36 @@
         {% endfor %}
       {% else %}
       <tr><td colspan="3" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+  <h2 class="px-4 pt-4 text-lg font-semibold text-slate-900">Pay by role</h2>
+  <table class="min-w-full divide-y divide-slate-200 text-sm">
+    <thead class="bg-slate-50 text-left text-slate-500">
+      <tr>
+        <th class="px-4 py-3 font-medium">Employee</th>
+        <th class="px-4 py-3 font-medium">Department</th>
+        <th class="px-4 py-3 font-medium">Role</th>
+        <th class="px-4 py-3 font-medium text-right">Hours</th>
+        <th class="px-4 py-3 font-medium text-right">Pay</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for r in rows %}
+        {% for rp in r.role_pay %}
+        <tr>
+          <td class="px-4 py-3 font-medium text-slate-900">{{ r.name }}</td>
+          <td class="px-4 py-3">{{ rp.department }}</td>
+          <td class="px-4 py-3">{{ rp.role_title }}</td>
+          <td class="px-4 py-3 text-right">{{ '%.2f'|format(rp.hours) }}</td>
+          <td class="px-4 py-3 text-right">${{ '%.2f'|format(rp.pay) }}</td>
+        </tr>
+        {% endfor %}
+      {% else %}
+      <tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
       {% endfor %}
     </tbody>
   </table>

@@ -19,9 +19,18 @@ Back up your data by copying this entire `data` folder somewhere safe.
 ## Files
 
 ### employees.json
-An array of employees. Employee NAMES are stored ONLY in this file.
+An array of employees. Employee NAMES are stored ONLY in this file. Each
+employee has a list of ROLES; one employee can hold several, each with its own
+department and hourly rate (e.g. a cashier in Bowling who's also a bartender
+in Restaurant).
     [
-      { "id": "a1b2c3d4e5f6", "name": "Jane Doe", "hourly_rate": 20.0, "active": true }
+      {
+        "id": "a1b2c3d4e5f6", "first_name": "Jane", "last_name": "Doe", "active": true,
+        "roles": [
+          { "id": "r1", "title": "Cashier", "department": "Bowling", "hourly_rate": 17.6 },
+          { "id": "r2", "title": "Bartender", "department": "Restaurant", "hourly_rate": 18.5 }
+        ]
+      }
     ]
 
 ### admin.json
@@ -33,29 +42,49 @@ the password with:  EmployeeShiftTracker.exe --reset-admin
 A random key used to sign the admin login session cookie for THIS installation.
 Keep it private. Deleting it just logs admins out.
 
-### <YYYY>/week-<WW>/shifts.json
-Shifts are organised by ISO 8601 week. Weeks start on MONDAY and the week number
-(01-53) is zero-padded. The ISO year can differ from the calendar year for a few
-days around January 1 - that is correct ISO behaviour.
+### <YYYY>/week-<YYYY-MM-DD>/shifts.json
+Shifts are organised by WORK WEEK, keyed by the week's start date (folder name
+is the start date itself, so there's no ambiguous week-numbering scheme). The
+work week's start day (default Sunday) is configurable in Admin > Settings and
+also drives overtime calculation. The <YYYY> folder uses the week START date's
+year, even for a week that runs into the next calendar year.
 
-Each shift stores IDs only (never the name):
+Each shift stores IDs only (never the name), plus a SNAPSHOT of the role that
+was picked at clock-in (title/department/hourly_rate) so a later change to
+that role's rate never rewrites the pay of shifts already worked, and the
+raw "hours" (clock_out - clock_in, not break-adjusted) once clocked out:
     [
       {
         "id": "f6e5d4c3b2a1",
         "employee_id": "a1b2c3d4e5f6",
         "clock_in":  "2026-07-06T09:00:00",
-        "clock_out": "2026-07-06T17:30:00"
+        "clock_out": "2026-07-06T17:30:00",
+        "role_id": "r1",
+        "role_title": "Cashier",
+        "department": "Bowling",
+        "hourly_rate": 17.6,
+        "hours": 8.5
       }
     ]
-A shift with "clock_out": null is still OPEN (the person has not clocked out).
-Timestamps are local system time in ISO 8601 (no timezone).
+A shift with "clock_out": null is still OPEN (the person has not clocked out);
+"hours" stays null until it's closed. Timestamps are local system time in ISO
+8601 (no timezone). Shifts recorded before roles existed have null role_id/
+role_title/department/hourly_rate.
 
-### <YYYY>/week-<WW>/adjustments.json  (optional)
+### <YYYY>/week-<YYYY-MM-DD>/adjustments.json  (optional)
 Per-shift unpaid-break overrides, kept out of shifts.json so shift records stay
 minimal. Keyed by shift id:
     { "f6e5d4c3b2a1": { "minutes": 0 } }
 `minutes` is the unpaid break to deduct for that one shift regardless of the
 automatic rule (0 = no break was taken).
+
+### audit.log
+An append-only audit trail, NOT shown anywhere in the app — one compact JSON
+object per line (JSON Lines), oldest first. Records employee adds/edits/
+deletes, shift edits/deletes (with old -> new values), and every clock in/out.
+    {"ts": "2026-07-06T09:00:00", "action": "clock_in", "actor": "kiosk", "employee_id": "a1b2c3d4e5f6", "name": "Jane Doe", "shift_id": "f6e5d4c3b2a1", "timestamp": "2026-07-06T09:00:00"}
+`actor` is "admin" for changes made from the admin panel, or "kiosk" for
+self-service clock in/out. This file is never rewritten, only appended to.
 
 ## Reminder
 Payroll figures produced by the app are configurable ESTIMATES, not legal or

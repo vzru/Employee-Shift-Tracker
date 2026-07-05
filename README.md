@@ -16,15 +16,20 @@ payroll export.
 
 ## Features
 
-- **Kiosk (no login):** dashboard lists every active employee; those clocked in
-  show a green indicator. Tap a name → confirm dialog with an **editable**
-  date+time (defaults to now) → clock in or out.
+- **Kiosk (no login):** dashboard is sectioned by department; each employee gets
+  one tappable card per role they hold (a cashier who's also a bartender gets a
+  card in both Bowling and Restaurant). Clocked-in cards show first and green.
+  Tap a card → confirm dialog with an **editable** date+time (defaults to now)
+  → clock in or out.
+- **Roles per employee:** one employee can hold several roles, each with its
+  own department and hourly rate. Each shift snapshots which role was worked so
+  a later rate change never rewrites past pay.
 - **Human-readable storage:** plain JSON under `/data`, usable without the app.
   Employee names live **only** in `employees.json`; shift files store IDs only.
 - **Atomic, serialized writes** (temp file + `os.replace` under a lock) so
   simultaneous clock-ins can't corrupt a file.
-- **Admin panel (password-protected, bcrypt):** manage employees & rates, view
-  and correct shifts, flag open (no clock-out) shifts.
+- **Admin panel (password-protected, bcrypt):** manage employees, roles &
+  rates, view and correct shifts, flag open (no clock-out) shifts.
 - **Ontario payroll settings (all editable):** unpaid break deduction, weekly
   overtime (>44h at 1.5×), and a minimum-wage reference with warnings.
 - **CSV payroll export** for any date range.
@@ -37,11 +42,12 @@ payroll export.
 ```
 data/
 ├─ README.md            # written on first run; documents the schema
-├─ employees.json       # [{ id, name, hourly_rate, active }]  <- names ONLY here
+├─ employees.json       # [{ id, first_name, last_name, active, roles: [{id, title, department, hourly_rate}] }]  <- names ONLY here
 ├─ admin.json           # { password_hash (bcrypt), settings {...} }
 ├─ secret.json          # per-machine session-cookie signing key
-└─ <YYYY>/week-<WW>/     # ISO 8601 week (weeks start Monday), WW zero-padded
-   ├─ shifts.json        # [{ id, employee_id, clock_in, clock_out }]
+├─ audit.log            # hidden append-only audit trail (JSON Lines); not shown in the app
+└─ <YYYY>/week-<YYYY-MM-DD>/   # work week keyed by its start date (configurable, default Sunday)
+   ├─ shifts.json        # [{ id, employee_id, clock_in, clock_out, role_id, role_title, department, hourly_rate, hours }]
    └─ adjustments.json   # optional per-shift break overrides { shift_id: {minutes} }
 ```
 
@@ -117,7 +123,7 @@ Alpine.js (vendored, offline) · bcrypt via passlib · packaged with PyInstaller
 
 ## Notes on the payroll math
 
-- **Overtime is weekly**, on a configurable work-week (default Monday start):
+- **Overtime is weekly**, on a configurable work-week (default Sunday start):
   hours over the weekly threshold (default 44) are paid at the multiplier
   (default 1.5×). For accurate overtime, pick export ranges aligned to whole
   work weeks. Genuine managers/supervisors may be **exempt** from overtime.

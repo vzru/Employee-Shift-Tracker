@@ -8,6 +8,17 @@ calculation. When an export range does not align to whole work weeks, the 44-hou
 threshold is applied only to the hours that fall inside the range for each work
 week — so a range that splits a work week can under-count overtime. For accurate
 overtime, choose a range aligned to your configured work-week start.
+
+RATES AND ROLES: each shift snapshots the role (title/department/hourly_rate)
+that was picked at clock-in, so a later rate change never rewrites the pay of
+shifts already worked. Within a work week, a given employee's shifts may carry
+different rates (different roles). Regular-vs-overtime hours are allocated
+CHRONOLOGICALLY by clock-in time: hours are "regular" until the weekly
+threshold is reached, and anything after that is "overtime" — priced at
+whichever role's rate was actually being worked when those hours accrued (a
+shift that itself straddles the threshold is split between the two). Shifts
+recorded before roles existed have no rate snapshot and are priced at $0 —
+see the migration note in repo.py.
 """
 
 from __future__ import annotations
@@ -19,7 +30,7 @@ from datetime import date, datetime, timedelta
 
 from . import repo
 from .models import Settings
-from .timeutil import iso_year_week, parse_iso, week_start_for
+from .timeutil import hours_between, parse_iso, week_start_for
 
 
 @dataclass
@@ -29,26 +40,30 @@ class WeeklyHours:
 
 
 @dataclass
+class RolePay:
+    role_title: str
+    department: str
+    hours: float
+    pay: float
+
+
+@dataclass
 class PayrollRow:
     employee_id: str
     name: str
-    pay_rate: float
     regular_hours: float = 0.0
     overtime_hours: float = 0.0
     regular_pay: float = 0.0
     overtime_pay: float = 0.0
     total_pay: float = 0.0
     open_shift_count: int = 0          # open shifts in range, excluded from totals
-    below_min_wage: bool = False
+    below_min_wage: bool = False       # any current role paid below minimum wage
     # Total worked hours per work-week, sorted by week_start ascending.
     weekly_hours: list[WeeklyHours] = field(default_factory=list)
-    # work-week-start -> break-adjusted worked hours (intermediate accumulator)
-    _week_hours: dict[date, float] = field(default_factory=dict)
-
-
-def _hours_between(clock_in_iso: str, clock_out_iso: str) -> float:
-    delta = parse_iso(clock_out_iso) - parse_iso(clock_in_iso)
-    return delta.total_seconds() / 3600.0
+    # Hours/pay broken out by role, sorted by (department, role_title).
+    role_pay: list[RolePay] = field(default_factory=list)
+    # work-week-start -> [(clock_in, adjusted_hours, rate, role_title, department), ...]
+    _week_shifts: dict[date, list[tuple]] = field(default_factory=dict)
 
 
 def _break_minutes_for_shift(
@@ -69,13 +84,13 @@ def _break_minutes_for_shift(
     return 0
 
 
-def _week_keys_for_range(start: date, end: date) -> set[tuple[int, int]]:
-    """Every ISO (year, week) whose file might hold a shift clocked in the range."""
-    keys: set[tuple[int, int]] = set()
+def _week_keys_for_range(start: date, end: date, week_start_weekday: int) -> set[date]:
+    """Every work-week start date whose file might hold a shift clocked in the range."""
+    keys: set[date] = set()
     day = start
     while day <= end:
         # Use noon to avoid any midnight edge ambiguity.
-        keys.add(iso_year_week(datetime(day.year, day.month, day.day, 12)))
+        keys.add(week_start_for(datetime(day.year, day.month, day.day, 12), week_start_weekday))
         day += timedelta(days=1)
     return keys
 
@@ -91,15 +106,15 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
         e.id: PayrollRow(
             employee_id=e.id,
             name=e.name,
-            pay_rate=e.hourly_rate,
-            below_min_wage=e.hourly_rate < settings.min_wage.rate,
+            below_min_wage=any(r.hourly_rate < settings.min_wage.rate for r in e.roles),
         )
         for e in employees.values()
     }
 
-    for (yr, wk) in _week_keys_for_range(start, end):
-        overrides = repo.load_adjustments(yr, wk)
-        for shift in repo.load_week_shifts(yr, wk):
+    wsw = settings.overtime.week_start_weekday
+    for week_start in _week_keys_for_range(start, end, wsw):
+        overrides = repo.load_adjustments(week_start)
+        for shift in repo.load_week_shifts(week_start):
             ci = parse_iso(shift.clock_in)
             if not (start <= ci.date() <= end):
                 continue  # shift's clock-in day is outside the export range
@@ -109,7 +124,6 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
                 row = PayrollRow(
                     employee_id=shift.employee_id,
                     name=f"(unknown id {shift.employee_id})",
-                    pay_rate=0.0,
                 )
                 rows[shift.employee_id] = row
 
@@ -117,40 +131,72 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
                 row.open_shift_count += 1  # flagged, never counted as hours
                 continue
 
-            duration = _hours_between(shift.clock_in, shift.clock_out)
+            duration = hours_between(shift.clock_in, shift.clock_out)
             deduct = _break_minutes_for_shift(
                 duration, shift.id, overrides, settings
             )
             adjusted = max(0.0, duration - deduct / 60.0)
 
-            ws = week_start_for(ci, settings.overtime.week_start_weekday)
-            row._week_hours[ws] = row._week_hours.get(ws, 0.0) + adjusted
+            rate = shift.hourly_rate if shift.hourly_rate is not None else 0.0
+            role_title = shift.role_title or "(no role)"
+            department = shift.department or "(no department)"
 
-    # Split each work-week's hours into regular vs overtime, then price it.
+            ws = week_start_for(ci, wsw)
+            row._week_shifts.setdefault(ws, []).append(
+                (ci, adjusted, rate, role_title, department)
+            )
+
     ot = settings.overtime
     for row in rows.values():
         row.weekly_hours = sorted(
-            (WeeklyHours(week_start=ws, hours=round(hours, 2))
-             for ws, hours in row._week_hours.items()),
+            (
+                WeeklyHours(week_start=ws, hours=round(sum(item[1] for item in items), 2))
+                for ws, items in row._week_shifts.items()
+            ),
             key=lambda wh: wh.week_start,
         )
-        for _week_start, hours in row._week_hours.items():
-            if ot.enabled and hours > ot.weekly_threshold:
-                overtime_h = hours - ot.weekly_threshold
-                regular_h = ot.weekly_threshold
-            else:
-                overtime_h = 0.0
-                regular_h = hours
-            row.regular_hours += regular_h
-            row.overtime_hours += overtime_h
+
+        role_pay_map: dict[tuple[str, str], RolePay] = {}
+        for items in row._week_shifts.values():
+            running = 0.0
+            # Chronological allocation: hours accrue regular-then-overtime in
+            # the order they were actually worked, each priced at that
+            # shift's own rate.
+            for _ci, hrs, rate, role_title, department in sorted(items, key=lambda t: t[0]):
+                if ot.enabled:
+                    regular_capacity = max(0.0, ot.weekly_threshold - running)
+                    reg_h = min(hrs, regular_capacity)
+                else:
+                    reg_h = hrs
+                ot_h = hrs - reg_h
+                running += hrs
+
+                reg_pay = reg_h * rate
+                ot_pay = ot_h * rate * ot.multiplier
+                row.regular_hours += reg_h
+                row.overtime_hours += ot_h
+                row.regular_pay += reg_pay
+                row.overtime_pay += ot_pay
+
+                key = (role_title, department)
+                rp = role_pay_map.setdefault(
+                    key, RolePay(role_title=role_title, department=department, hours=0.0, pay=0.0)
+                )
+                rp.hours += hrs
+                rp.pay += reg_pay + ot_pay
+
+        row.role_pay = sorted(
+            role_pay_map.values(), key=lambda rp: (rp.department.lower(), rp.role_title.lower())
+        )
 
         row.regular_hours = round(row.regular_hours, 2)
         row.overtime_hours = round(row.overtime_hours, 2)
-        row.regular_pay = round(row.regular_hours * row.pay_rate, 2)
-        row.overtime_pay = round(
-            row.overtime_hours * row.pay_rate * ot.multiplier, 2
-        )
+        row.regular_pay = round(row.regular_pay, 2)
+        row.overtime_pay = round(row.overtime_pay, 2)
         row.total_pay = round(row.regular_pay + row.overtime_pay, 2)
+        for rp in row.role_pay:
+            rp.hours = round(rp.hours, 2)
+            rp.pay = round(rp.pay, 2)
 
     # Stable, human-friendly ordering by name.
     return sorted(rows.values(), key=lambda r: r.name.lower())
@@ -162,7 +208,7 @@ def to_csv(rows: list[PayrollRow], start: date, end: date) -> str:
     writer = csv.writer(buf)
     writer.writerow([f"Payroll export {start.isoformat()} to {end.isoformat()}"])
     writer.writerow([
-        "Employee", "Regular Hours", "Overtime Hours", "Pay Rate",
+        "Employee", "Regular Hours", "Overtime Hours",
         "Regular Pay", "Overtime Pay", "Total Pay", "Flags",
     ])
     for r in rows:
@@ -170,12 +216,11 @@ def to_csv(rows: list[PayrollRow], start: date, end: date) -> str:
         if r.open_shift_count:
             flags.append(f"{r.open_shift_count} OPEN SHIFT(S) EXCLUDED")
         if r.below_min_wage:
-            flags.append("RATE BELOW MIN WAGE")
+            flags.append("A ROLE IS RATED BELOW MIN WAGE")
         writer.writerow([
             r.name,
             f"{r.regular_hours:.2f}",
             f"{r.overtime_hours:.2f}",
-            f"{r.pay_rate:.2f}",
             f"{r.regular_pay:.2f}",
             f"{r.overtime_pay:.2f}",
             f"{r.total_pay:.2f}",
@@ -187,6 +232,13 @@ def to_csv(rows: list[PayrollRow], start: date, end: date) -> str:
     for r in rows:
         for wh in r.weekly_hours:
             writer.writerow([r.name, wh.week_start.isoformat(), f"{wh.hours:.2f}"])
+
+    writer.writerow([])
+    writer.writerow(["Pay by role"])
+    writer.writerow(["Employee", "Department", "Role", "Hours", "Pay"])
+    for r in rows:
+        for rp in r.role_pay:
+            writer.writerow([r.name, rp.department, rp.role_title, f"{rp.hours:.2f}", f"{rp.pay:.2f}"])
 
     writer.writerow([])
     writer.writerow([

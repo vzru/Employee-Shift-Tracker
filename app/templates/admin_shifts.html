@@ -1,6 +1,7 @@
 {% extends "base.html" %}
-{% block title %}Shifts — {{ year }} week {{ '%02d'|format(week) }}{% endblock %}
+{% block title %}Shifts — Week of {{ week_start.strftime('%b %d, %Y') }}{% endblock %}
 {% block content %}
+<div x-data="shiftsPage()">
 <div class="flex items-center justify-between">
   <h1 class="text-2xl font-bold text-slate-900">Shifts</h1>
   <a href="/admin" class="text-sm text-indigo-600 hover:underline">&larr; Back to admin</a>
@@ -8,102 +9,188 @@
 
 <!-- Week navigation -->
 <div class="mt-4 flex flex-wrap items-center gap-3">
-  <a href="/admin/shifts?year={{ prev_y }}&week={{ prev_w }}"
+  <a href="/admin/shifts?week_start={{ prev_week_start.isoformat() }}"
      class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">&larr; Previous week</a>
-  <span class="font-semibold text-slate-800">ISO {{ year }} · Week {{ '%02d'|format(week) }}</span>
-  <a href="/admin/shifts?year={{ next_y }}&week={{ next_w }}"
+  <span class="font-semibold text-slate-800">
+    Week of {{ week_start.strftime('%b %d') }} – {{ week_end.strftime('%b %d, %Y') }}
+  </span>
+  <a href="/admin/shifts?week_start={{ next_week_start.isoformat() }}"
      class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">Next week &rarr;</a>
 
   <form method="get" action="/admin/shifts" class="ml-auto flex items-center gap-2 text-sm">
-    <input type="number" name="year" value="{{ year }}" class="w-24 rounded-lg border border-slate-300 px-2 py-1">
-    <input type="number" name="week" value="{{ week }}" min="1" max="53" class="w-20 rounded-lg border border-slate-300 px-2 py-1">
+    <label class="flex items-center gap-2">
+      <span class="text-slate-500">Jump to date</span>
+      <input type="date" name="week_start" value="{{ week_start.isoformat() }}"
+             class="rounded-lg border border-slate-300 px-2 py-1">
+    </label>
     <button class="rounded-lg bg-slate-800 px-3 py-1.5 text-white hover:bg-slate-700">Go</button>
   </form>
 </div>
 
 {% if open_count %}
 <div class="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-  <strong>{{ open_count }}</strong> open shift(s) this week have no clock-out. Correct them below — open shifts are excluded from payroll.
+  <strong>{{ open_count }}</strong> open shift(s) this week have no clock-out. Correct them in the shift details — open shifts are excluded from payroll.
 </div>
 {% endif %}
 
+<!-- Employee summary -->
 <div class="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
   <table class="min-w-full divide-y divide-slate-200 text-sm">
     <thead class="bg-slate-50 text-left text-slate-500">
       <tr>
         <th class="px-4 py-3 font-medium">Employee</th>
-        <th class="px-4 py-3 font-medium">Clock in</th>
-        <th class="px-4 py-3 font-medium">Clock out</th>
-        <th class="px-4 py-3 font-medium">Hours</th>
-        <th class="px-4 py-3 font-medium">Break</th>
+        <th class="px-4 py-3 font-medium text-right">Total hours</th>
+        <th class="px-4 py-3 font-medium text-right">Shifts</th>
+        <th class="px-4 py-3 font-medium">Flags</th>
         <th class="px-4 py-3 font-medium text-right">Actions</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-slate-100">
-      {% for s in shifts %}
-      <tr x-data="{ editing: false }" class="{% if s.open %}bg-amber-50/60{% endif %}">
-        <td class="px-4 py-3 font-medium text-slate-900" x-show="!editing">{{ s.name }}</td>
-        <td class="px-4 py-3 text-slate-700" x-show="!editing">{{ s.clock_in.replace('T',' ') }}</td>
-        <td class="px-4 py-3" x-show="!editing">
-          {% if s.open %}
-            <span class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">OPEN — no clock-out</span>
-          {% else %}
-            <span class="text-slate-700">{{ s.clock_out.replace('T',' ') }}</span>
-          {% endif %}
+      {% for a in summary %}
+      <tr class="{% if a.open_count %}bg-amber-50/60{% endif %}">
+        <td class="px-4 py-3 font-medium text-slate-900">{{ a.name }}</td>
+        <td class="px-4 py-3 text-right text-slate-700">{{ '%.2f'|format(a.total_hours) }}</td>
+        <td class="px-4 py-3 text-right text-slate-700">{{ a.shift_count }}</td>
+        <td class="px-4 py-3 text-xs">
+          {% if a.open_count %}<span class="text-amber-700">{{ a.open_count }} open</span>{% endif %}
         </td>
-        <td class="px-4 py-3 text-slate-700" x-show="!editing">{% if s.duration is not none %}{{ '%.2f'|format(s.duration) }}{% else %}—{% endif %}</td>
-        <td class="px-4 py-3 text-slate-700" x-show="!editing">
-          {% if s.break_override is not none %}{{ s.break_override }} min (override){% else %}auto{% endif %}
-        </td>
-        <td class="px-4 py-3 text-right" x-show="!editing">
-          <button @click="editing = true" class="text-indigo-600 hover:underline">Edit</button>
-          <form method="post" action="/admin/shifts/delete" class="inline"
-                onsubmit="return confirm('Delete this shift entry? This cannot be undone.');">
-            <input type="hidden" name="year" value="{{ year }}">
-            <input type="hidden" name="week" value="{{ week }}">
-            <input type="hidden" name="shift_id" value="{{ s.id }}">
-            <button type="submit" class="ml-3 text-red-600 hover:underline">Delete</button>
-          </form>
-        </td>
-
-        <!-- Edit form -->
-        <td colspan="6" class="px-4 py-3" x-show="editing" x-cloak>
-          <form method="post" action="/admin/shifts/edit" class="grid gap-3 sm:grid-cols-5 sm:items-end">
-            <input type="hidden" name="year" value="{{ year }}">
-            <input type="hidden" name="week" value="{{ week }}">
-            <input type="hidden" name="shift_id" value="{{ s.id }}">
-            <div class="sm:col-span-1 text-sm font-medium text-slate-700 pb-2">{{ s.name }}</div>
-            <label class="block">
-              <span class="text-xs font-medium text-slate-500">Clock in</span>
-              <input type="datetime-local" name="clock_in" value="{{ s.clock_in_input }}" step="60" required
-                     class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
-            </label>
-            <label class="block">
-              <span class="text-xs font-medium text-slate-500">Clock out <span class="text-slate-400">(blank = still open)</span></span>
-              <input type="datetime-local" name="clock_out" value="{{ s.clock_out_input }}" step="60"
-                     class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
-            </label>
-            <label class="block">
-              <span class="text-xs font-medium text-slate-500">Break override (min)</span>
-              <input type="number" name="break_override" min="0" value="{{ s.break_override if s.break_override is not none else '' }}"
-                     placeholder="auto"
-                     class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
-            </label>
-            <div class="sm:col-span-5 flex gap-2">
-              <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Save</button>
-              <button type="button" @click="editing = false" class="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-            </div>
-          </form>
+        <td class="px-4 py-3 text-right">
+          <button @click="openDetails('{{ a.employee_id }}')" class="text-indigo-600 hover:underline">View details</button>
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="6" class="px-4 py-6 text-center text-slate-400">No shifts recorded for this week.</td></tr>
+      <tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">No shifts recorded for this week.</td></tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
-<p class="mt-3 text-xs text-slate-400">
-  Break "override" fixes the unpaid break minutes for a single shift regardless of the automatic rule
-  (enter 0 if the employee did not take a break). Leave blank to use the automatic setting.
-</p>
+
+<!-- Shift details popup (per employee) -->
+<div x-show="detailsOpen" x-cloak
+     class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4"
+     @keydown.escape.window="detailsOpen = false">
+  <div class="w-full max-w-3xl rounded-2xl bg-white p-6 shadow-xl" @click.outside="detailsOpen = false">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-slate-900" x-text="selectedName + ' — shifts this week'"></h2>
+      <button type="button" @click="detailsOpen = false" class="text-slate-400 hover:text-slate-600">&times;</button>
+    </div>
+
+    <div class="mt-4 max-h-[60vh] overflow-y-auto">
+      <table class="min-w-full divide-y divide-slate-200 text-sm">
+        <thead class="bg-slate-50 text-left text-slate-500">
+          <tr>
+            <th class="px-3 py-2 font-medium">Role</th>
+            <th class="px-3 py-2 font-medium">Clock in</th>
+            <th class="px-3 py-2 font-medium">Clock out</th>
+            <th class="px-3 py-2 font-medium text-right">Hours</th>
+            <th class="px-3 py-2 font-medium">Break</th>
+            <th class="px-3 py-2 font-medium text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100">
+          <template x-for="s in selectedShifts" :key="s.id">
+            <tr :class="s.open ? 'bg-amber-50/60' : ''">
+              <template x-if="editingShiftId !== s.id">
+                <td class="px-3 py-2 text-slate-700">
+                  <span x-text="s.role_title"></span>
+                  <span class="text-slate-400" x-text="'— ' + s.department"></span>
+                </td>
+              </template>
+              <template x-if="editingShiftId !== s.id">
+                <td class="px-3 py-2 text-slate-700" x-text="s.clock_in.replace('T', ' ')"></td>
+              </template>
+              <template x-if="editingShiftId !== s.id">
+                <td class="px-3 py-2">
+                  <span x-show="s.open" class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">OPEN — no clock-out</span>
+                  <span x-show="!s.open" class="text-slate-700" x-text="s.clock_out ? s.clock_out.replace('T', ' ') : ''"></span>
+                </td>
+              </template>
+              <template x-if="editingShiftId !== s.id">
+                <td class="px-3 py-2 text-right text-slate-700" x-text="s.duration !== null ? s.duration.toFixed(2) : '—'"></td>
+              </template>
+              <template x-if="editingShiftId !== s.id">
+                <td class="px-3 py-2 text-slate-700" x-text="s.break_override !== null ? s.break_override + ' min (override)' : 'auto'"></td>
+              </template>
+              <template x-if="editingShiftId !== s.id">
+                <td class="px-3 py-2 text-right">
+                  <button type="button" @click="editingShiftId = s.id" class="text-indigo-600 hover:underline">Edit</button>
+                  <form method="post" action="/admin/shifts/delete" class="inline"
+                        onsubmit="return confirm('Delete this shift entry? This cannot be undone.');">
+                    <input type="hidden" name="week_start" value="{{ week_start.isoformat() }}">
+                    <input type="hidden" name="shift_id" :value="s.id">
+                    <button type="submit" class="ml-3 text-red-600 hover:underline">Delete</button>
+                  </form>
+                </td>
+              </template>
+
+              <!-- Edit form spanning the row -->
+              <template x-if="editingShiftId === s.id">
+                <td colspan="6" class="px-3 py-3" x-cloak>
+                  <form method="post" action="/admin/shifts/edit" class="grid gap-3 sm:grid-cols-4 sm:items-end">
+                    <input type="hidden" name="week_start" value="{{ week_start.isoformat() }}">
+                    <input type="hidden" name="shift_id" :value="s.id">
+                    <label class="block">
+                      <span class="text-xs font-medium text-slate-500">Clock in</span>
+                      <input type="datetime-local" name="clock_in" :value="s.clock_in_input" step="60" required
+                             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
+                    </label>
+                    <label class="block">
+                      <span class="text-xs font-medium text-slate-500">Clock out <span class="text-slate-400">(blank = still open)</span></span>
+                      <input type="datetime-local" name="clock_out" :value="s.clock_out_input" step="60"
+                             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
+                    </label>
+                    <label class="block">
+                      <span class="text-xs font-medium text-slate-500">Break override (min)</span>
+                      <input type="number" name="break_override" min="0" :value="s.break_override !== null ? s.break_override : ''"
+                             placeholder="auto"
+                             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
+                    </label>
+                    <div class="flex gap-2">
+                      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Save</button>
+                      <button type="button" @click="editingShiftId = null" class="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+                    </div>
+                  </form>
+                </td>
+              </template>
+            </tr>
+          </template>
+          <tr x-show="selectedShifts.length === 0"><td colspan="6" class="px-3 py-6 text-center text-slate-400">No shifts.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p class="mt-3 text-xs text-slate-400">
+      Break "override" fixes the unpaid break minutes for a single shift regardless of the automatic rule
+      (enter 0 if the employee did not take a break). Leave blank to use the automatic setting.
+    </p>
+
+    <div class="mt-4 flex justify-end">
+      <button type="button" @click="detailsOpen = false" class="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Close</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<script>
+  function shiftsPage() {
+    return {
+      shifts: {{ shifts | tojson }},
+      detailsOpen: false,
+      selectedId: null,
+      editingShiftId: null,
+      get selectedShifts() {
+        return this.shifts.filter(s => s.employee_id === this.selectedId);
+      },
+      get selectedName() {
+        const s = this.shifts.find(s => s.employee_id === this.selectedId);
+        return s ? s.name : '';
+      },
+      openDetails(employeeId) {
+        this.selectedId = employeeId;
+        this.editingShiftId = null;
+        this.detailsOpen = true;
+      },
+    };
+  }
+</script>
 {% endblock %}

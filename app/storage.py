@@ -78,6 +78,21 @@ def write_json(path: Path, data: Any) -> None:
             raise
 
 
+def append_json_line(path: Path, obj: Any) -> None:
+    """
+    Append one compact JSON object as a line to an append-only log file (JSON
+    Lines format). Used for the audit log, where a whole-file atomic rewrite
+    per entry would be wasteful and the log is never edited, only appended to.
+    """
+    with _LOCK:
+        ensure_dir(path.parent)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(obj, ensure_ascii=False))
+            fh.write("\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+
+
 def update_json(path: Path, default: Any, mutator) -> Any:
     """
     Atomic read-modify-write under a single lock hold.
