@@ -10,9 +10,9 @@ import uuid
 from datetime import date, timedelta
 from typing import Optional
 
-from . import paths, storage
+from . import audit, paths, storage
 from .models import AdminData, Employee, Settings, Shift
-from .timeutil import hours_between, now_local, parse_iso, week_start_for
+from .timeutil import hours_between, now_local, parse_iso, to_iso, week_start_for
 
 # How many work weeks back to scan when locating open shifts (covers shifts
 # that span a week boundary, e.g. an overnight shift started late on the last
@@ -122,23 +122,72 @@ def _recent_week_keys(count: int = _OPEN_SCAN_WEEKS) -> list[date]:
 def find_open_shift(employee_id: str) -> Optional[tuple[date, Shift]]:
     """
     Locate an employee's currently-open shift (clock_out is None), scanning the
-    most recent weeks. Returns (week_start, shift) or None.
+    most recent weeks. Returns (week_start, shift) or None. Voided shifts are
+    ignored — a voided shift is treated as if removed for clock-state purposes.
     """
     for week_start in _recent_week_keys():
         for s in load_week_shifts(week_start):
-            if s.employee_id == employee_id and s.clock_out is None:
+            if s.employee_id == employee_id and s.clock_out is None and not s.voided:
                 return (week_start, s)
     return None
 
 
 def open_shifts_by_employee() -> dict[str, Shift]:
-    """Map employee_id -> their open Shift, across recent weeks (for the kiosk)."""
+    """Map employee_id -> their open Shift, across recent weeks (for the kiosk).
+    Voided shifts are ignored."""
     result: dict[str, Shift] = {}
     for week_start in _recent_week_keys():
         for s in load_week_shifts(week_start):
-            if s.clock_out is None and s.employee_id not in result:
+            if s.clock_out is None and not s.voided and s.employee_id not in result:
                 result[s.employee_id] = s
     return result
+
+
+def auto_close_stale_shifts() -> list[Shift]:
+    """
+    Safety net: close any shift that's been open longer than
+    Settings.auto_clockout.threshold_hours, recording the actual time this
+    was noticed (there's no background timer — callers invoke this
+    opportunistically on page load: the kiosk main page and the admin
+    home/Shifts pages; a clock in/out redirects to the main page which sweeps
+    there). Voided shifts are skipped. Returns the shifts that were closed;
+    each is logged to the audit trail as actor "system".
+    """
+    settings = load_settings()
+    ac = settings.auto_clockout
+    if not ac.enabled:
+        return []
+
+    now = now_local()
+    now_iso = to_iso(now)
+    closed: list[Shift] = []
+
+    for week_start in _recent_week_keys():
+        newly_closed_ids: list[str] = []
+
+        def mutator(current: list[dict]) -> list[dict]:
+            for s in current:
+                if s.get("clock_out") is not None or s.get("voided"):
+                    continue
+                elapsed_hours = (now - parse_iso(s["clock_in"])).total_seconds() / 3600.0
+                if elapsed_hours > ac.threshold_hours:
+                    s["clock_out"] = now_iso
+                    s["hours"] = round(hours_between(s["clock_in"], now_iso), 2)
+                    s["auto_clocked_out"] = True
+                    newly_closed_ids.append(s["id"])
+            return current
+
+        result = storage.update_json(paths.shifts_file(week_start), default=[], mutator=mutator)
+        if newly_closed_ids:
+            closed.extend(Shift(**s) for s in result if s["id"] in newly_closed_ids)
+
+    for shift in closed:
+        audit.log(
+            "shift_auto_clocked_out", "system",
+            shift_id=shift.id, employee_id=shift.employee_id,
+            clock_in=shift.clock_in, clock_out=shift.clock_out, hours=shift.hours,
+        )
+    return closed
 
 
 def clock_in(employee_id: str, timestamp_iso: str, role_id: str) -> Shift:
@@ -235,9 +284,17 @@ def update_shift(
     )
 
 
-def delete_shift(week_start: date, shift_id: str) -> None:
+def set_shift_voided(week_start: date, shift_id: str, voided: bool) -> None:
+    """
+    Soft-delete (or restore) a shift by flipping its ``voided`` flag. The record
+    stays on disk for the historical trail; voided shifts are excluded from
+    payroll, the Shifts summary, and clock-state logic (see find_open_shift).
+    """
     def mutator(current: list[dict]) -> list[dict]:
-        return [s for s in current if s["id"] != shift_id]
+        for s in current:
+            if s["id"] == shift_id:
+                s["voided"] = voided
+        return current
 
     storage.update_json(
         paths.shifts_file(week_start), default=[], mutator=mutator

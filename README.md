@@ -30,6 +30,14 @@ payroll export.
   simultaneous clock-ins can't corrupt a file.
 - **Admin panel (password-protected, bcrypt):** manage employees, roles &
   rates, view and correct shifts, flag open (no clock-out) shifts.
+- **Soft deletes (nothing is lost):** employees are *deactivated* (hidden from
+  the kiosk, kept for history) rather than deleted; shifts are *voided* (kept
+  on disk, excluded from payroll, restorable) rather than removed. Both are
+  audit-logged and reversible.
+- **Automatic clock-out (configurable):** a shift left open past a threshold
+  (default 24h) is closed automatically the next time the kiosk or admin panel
+  is opened, and flagged on the Shifts page so the real end time can be
+  corrected.
 - **Ontario payroll settings (all editable):** unpaid break deduction, weekly
   overtime (>44h at 1.5×), and a minimum-wage reference with warnings.
 - **CSV payroll export** for any date range.
@@ -47,7 +55,7 @@ data/
 ├─ secret.json          # per-machine session-cookie signing key
 ├─ audit.log            # hidden append-only audit trail (JSON Lines); not shown in the app
 └─ <YYYY>/week-<YYYY-MM-DD>/   # work week keyed by its start date (configurable, default Sunday)
-   ├─ shifts.json        # [{ id, employee_id, clock_in, clock_out, role_id, role_title, department, hourly_rate, hours }]
+   ├─ shifts.json        # [{ id, employee_id, clock_in, clock_out, role_id, role_title, department, hourly_rate, hours, auto_clocked_out, voided }]
    └─ adjustments.json   # optional per-shift break overrides { shift_id: {minutes} }
 ```
 

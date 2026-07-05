@@ -7,7 +7,7 @@
 </div>
 
 <!-- Add employee -->
-<div class="mt-4 rounded-xl border border-slate-200 bg-white p-5" x-data="rolesEditor([], {{ role_catalog | tojson }})">
+<div class="mt-4 rounded-xl border border-slate-200 bg-white p-5" x-data='rolesEditor([], {{ role_catalog | tojson }})'>
   <h2 class="font-semibold text-slate-900">Add employee</h2>
   {% if not role_catalog %}
   <p class="mt-1 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
@@ -78,7 +78,7 @@
     </thead>
     <tbody class="divide-y divide-slate-100">
       {% for e in employees %}
-      <tr x-data="{ editing: false, ...rolesEditor({{ e.roles | tojson }}, {{ role_catalog | tojson }}) }">
+      <tr x-data='{ editing: false, ...rolesEditor({{ e.roles | tojson }}, {{ role_catalog | tojson }}) }'>
         <!-- Display cells (hidden while editing; the edit form spans the row) -->
         <td class="px-4 py-3 font-medium text-slate-900 align-top" x-show="!editing">{{ e.name }}</td>
         <td class="px-4 py-3" x-show="!editing">
@@ -106,10 +106,18 @@
         </td>
         <td class="px-4 py-3 text-right align-top" x-show="!editing">
           <button @click="editing = true" class="text-indigo-600 hover:underline">Edit</button>
-          <form method="post" action="/admin/employees/{{ e.id }}/delete" class="inline"
-                onsubmit="return confirm('Remove {{ e.name }}? This does not delete their past shift records.');">
-            <button type="submit" class="ml-3 text-red-600 hover:underline">Remove</button>
+          {% if e.active %}
+          <form method="post" action="/admin/employees/{{ e.id }}/set-active" class="inline"
+                onsubmit="return confirm('Deactivate {{ e.name }}? They will be hidden from the kiosk but kept here, and all their shift records are preserved.');">
+            <input type="hidden" name="active" value="false">
+            <button type="submit" class="ml-3 text-amber-700 hover:underline">Deactivate</button>
           </form>
+          {% else %}
+          <form method="post" action="/admin/employees/{{ e.id }}/set-active" class="inline">
+            <input type="hidden" name="active" value="true">
+            <button type="submit" class="ml-3 text-emerald-700 hover:underline">Activate</button>
+          </form>
+          {% endif %}
         </td>
 
         <!-- Edit form spanning the row -->

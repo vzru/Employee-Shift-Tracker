@@ -14,7 +14,8 @@ from fastapi.responses import RedirectResponse, Response
 from .. import audit, payroll, repo, security
 from ..deps import redirect, require_admin, templates
 from ..models import (
-    BreakSettings, Employee, MinWageSettings, OvertimeSettings, Role, Settings,
+    AutoClockoutSettings, BreakSettings, Employee, MinWageSettings,
+    OvertimeSettings, Role, Settings,
 )
 from ..timeutil import (
     hours_between, now_local, parse_iso, to_iso, week_end_for, week_start_for,
@@ -99,6 +100,7 @@ def change_password(
 
 @router.get("")
 def admin_home(request: Request, _: bool = Depends(require_admin)):
+    repo.auto_close_stale_shifts()
     employees = repo.load_employees()
     open_map = repo.open_shifts_by_employee()
     settings = repo.load_settings()
@@ -242,20 +244,34 @@ def employee_edit(
     return redirect("/admin/employees?ok=Employee+updated")
 
 
-@router.post("/employees/{employee_id}/delete")
-def employee_delete(
-    request: Request, employee_id: str, _: bool = Depends(require_admin),
+@router.post("/employees/{employee_id}/set-active")
+def employee_set_active(
+    request: Request,
+    employee_id: str,
+    active: str = Form(...),  # "true" | "false"
+    _: bool = Depends(require_admin),
 ):
+    """
+    Soft delete / restore: flip an employee's active flag instead of removing
+    them. Inactive employees are hidden from the kiosk but kept in the admin
+    list, and all their shift history is preserved. (Employees are never hard
+    deleted — historical shifts must always resolve to a name.)
+    """
+    want_active = active == "true"
     employees = repo.load_employees()
-    victim = next((e for e in employees if e.id == employee_id), None)
-    employees = [e for e in employees if e.id != employee_id]
-    repo.save_employees(employees)
-    if victim is not None:
+    target = next((e for e in employees if e.id == employee_id), None)
+    if target is None:
+        return redirect("/admin/employees?err=Unknown+employee")
+    if target.active != want_active:
+        target.active = want_active
+        repo.save_employees(employees)
         audit.log(
-            "employee_deleted", "admin", employee_id=employee_id,
-            first_name=victim.first_name, last_name=victim.last_name,
+            "employee_activated" if want_active else "employee_deactivated",
+            "admin", employee_id=employee_id,
+            first_name=target.first_name, last_name=target.last_name,
         )
-    return redirect("/admin/employees?ok=Employee+removed")
+    verb = "reactivated" if want_active else "deactivated"
+    return redirect(f"/admin/employees?ok=Employee+{verb}")
 
 
 # --- Shifts ------------------------------------------------------------------
@@ -268,6 +284,7 @@ def shifts_page(
     err: str | None = None,
     _: bool = Depends(require_admin),
 ):
+    repo.auto_close_stale_shifts()
     wsw = repo.load_settings().overtime.week_start_weekday
     # Resolve whatever date was passed (any day, not necessarily a week start)
     # to the week containing it; default to today if missing/unparseable.
@@ -299,6 +316,8 @@ def shifts_page(
             "break_override": overrides.get(s.id, {}).get("minutes"),
             "role_title": s.role_title or "—",
             "department": s.department or "—",
+            "auto_clocked_out": s.auto_clocked_out,
+            "voided": s.voided,
         })
 
     return templates.TemplateResponse(
@@ -310,7 +329,8 @@ def shifts_page(
             "next_week_start": ws + timedelta(days=7),
             "shifts": view,
             "summary": _employee_summary(view),
-            "open_count": sum(1 for v in view if v["open"]),
+            # Open count excludes voided shifts (they're operationally "removed").
+            "open_count": sum(1 for v in view if v["open"] and not v["voided"]),
             "ok": ok, "err": err,
         },
     )
@@ -323,7 +343,10 @@ def _to_input(iso: str) -> str:
 
 def _employee_summary(view: list[dict]) -> list[dict]:
     """Per-employee totals for the week: raw hours (unadjusted for break rules,
-    matching the per-shift "Hours" column), shift count, and open-shift count."""
+    matching the per-shift "Hours" column), shift count, and open-shift count.
+    Voided shifts don't count toward any total but are tallied separately so
+    the employee still shows up (and their details popup stays reachable to
+    un-void from)."""
     by_employee: dict[str, dict] = {}
     for v in view:
         agg = by_employee.setdefault(v["employee_id"], {
@@ -332,7 +355,11 @@ def _employee_summary(view: list[dict]) -> list[dict]:
             "total_hours": 0.0,
             "shift_count": 0,
             "open_count": 0,
+            "voided_count": 0,
         })
+        if v["voided"]:
+            agg["voided_count"] += 1
+            continue
         agg["shift_count"] += 1
         if v["open"]:
             agg["open_count"] += 1
@@ -392,26 +419,33 @@ def shift_edit(
     return redirect(f"/admin/shifts?week_start={week_start}&ok=Shift+updated")
 
 
-@router.post("/shifts/delete")
-def shift_delete(
+@router.post("/shifts/void")
+def shift_void(
     request: Request,
     week_start: str = Form(...),
     shift_id: str = Form(...),
+    voided: str = Form(...),  # "true" | "false"
     _: bool = Depends(require_admin),
 ):
+    """
+    Soft delete / restore a shift. Voided shifts stay on disk (kept for the
+    record) but are excluded from payroll, the summary, and clock-state logic.
+    Break overrides are left intact so un-voiding restores the shift exactly.
+    """
     ws = date.fromisoformat(week_start)
+    want_voided = voided == "true"
     before = next(
         (s for s in repo.load_week_shifts(ws) if s.id == shift_id), None
     )
-    repo.delete_shift(ws, shift_id)
-    repo.set_break_override(ws, shift_id, None)  # clear any override too
-    if before is not None:
+    repo.set_shift_voided(ws, shift_id, want_voided)
+    if before is not None and before.voided != want_voided:
         audit.log(
-            "shift_deleted", "admin", shift_id=shift_id,
-            employee_id=before.employee_id,
+            "shift_voided" if want_voided else "shift_unvoided", "admin",
+            shift_id=shift_id, employee_id=before.employee_id,
             clock_in=before.clock_in, clock_out=before.clock_out,
         )
-    return redirect(f"/admin/shifts?week_start={week_start}&ok=Shift+deleted")
+    verb = "voided" if want_voided else "restored"
+    return redirect(f"/admin/shifts?week_start={week_start}&ok=Shift+{verb}")
 
 
 # --- Settings ----------------------------------------------------------------
@@ -470,6 +504,9 @@ def settings_save(
     min_wage_rate: float = Form(17.60),
     # roles & departments catalog
     role_catalog_json: str = Form("{}"),
+    # automatic clock-out
+    auto_clockout_enabled: str | None = Form(None),
+    auto_clockout_threshold_hours: float = Form(24.0),
     _: bool = Depends(require_admin),
 ):
     settings = Settings(
@@ -486,6 +523,10 @@ def settings_save(
         ),
         min_wage=MinWageSettings(rate=min_wage_rate),
         role_catalog=_parse_role_catalog(role_catalog_json),
+        auto_clockout=AutoClockoutSettings(
+            enabled=auto_clockout_enabled is not None,
+            threshold_hours=auto_clockout_threshold_hours,
+        ),
     )
     repo.save_settings(settings)
     return redirect("/admin/settings?ok=Settings+saved")

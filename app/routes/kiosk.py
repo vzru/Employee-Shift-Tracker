@@ -21,6 +21,7 @@ router = APIRouter()
 
 @router.get("/")
 def dashboard(request: Request, ok: str | None = None, err: str | None = None):
+    repo.auto_close_stale_shifts()
     employees = [e for e in repo.load_employees() if e.active]
     open_map = repo.open_shifts_by_employee()  # employee_id -> open Shift
 
@@ -95,6 +96,10 @@ def clock(
     ``role_id`` is required to clock IN (which role is being worked); it's
     ignored when clocking out, since that just closes whatever shift is open.
     """
+    # NB: the auto-clockout sweep is intentionally NOT run here. It runs on the
+    # kiosk main page and admin pages; a successful clock in/out redirects to
+    # the main page, which sweeps there. Running it before the clock action
+    # could close a stale shift mid-request and change the in-vs-out decision.
     employee = repo.get_employee(employee_id)
     if employee is None:
         return RedirectResponse("/?err=Unknown+employee", status_code=303)

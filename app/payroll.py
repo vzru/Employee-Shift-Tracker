@@ -115,6 +115,8 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
     for week_start in _week_keys_for_range(start, end, wsw):
         overrides = repo.load_adjustments(week_start)
         for shift in repo.load_week_shifts(week_start):
+            if shift.voided:
+                continue  # soft-deleted: kept on disk, excluded from payroll
             ci = parse_iso(shift.clock_in)
             if not (start <= ci.date() <= end):
                 continue  # shift's clock-in day is outside the export range

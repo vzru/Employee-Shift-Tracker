@@ -16,10 +16,12 @@
         Log in
       </button>
     </form>
-    <p class="mt-4 text-xs text-slate-400">
-      Forgot it? Run <code class="rounded bg-slate-100 px-1">EmployeeShiftTracker.exe --reset-admin</code>
-      in a terminal on this PC.
-    </p>
+    {#
+      Forgot the password? Run this PC's EmployeeShiftTracker.exe --reset-admin
+      in a terminal (see reset_admin.py / admin_reset.py). Deliberately not
+      shown on this page (not even in page source) — this is an
+      unauthenticated, publicly-reachable page.
+    #}
   </div>
 </div>
 {% endblock %}

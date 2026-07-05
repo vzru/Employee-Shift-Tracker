@@ -63,6 +63,16 @@ class Shift(BaseModel):
     # matches the admin Shifts page's "Hours" column. Filled in on clock-out
     # and recomputed on any admin edit; None while the shift is still open.
     hours: Optional[float] = None
+    # True if this shift was closed by the automatic-clock-out safety net
+    # (see repo.auto_close_stale_shifts) rather than a real clock-out — the
+    # recorded clock_out is when the app happened to notice, not necessarily
+    # when the employee actually left. Flagged in the admin Shifts page.
+    auto_clocked_out: bool = False
+    # Soft delete: a voided shift is KEPT on disk for the historical record but
+    # treated as if removed everywhere operational — excluded from payroll and
+    # the Shifts-page summary, ignored by clock-state/auto-clockout logic. An
+    # admin can un-void it. Preferred over hard deletion so nothing is lost.
+    voided: bool = False
 
 
 # --- Payroll settings (Ontario) ----------------------------------------------
@@ -94,10 +104,21 @@ class MinWageSettings(BaseModel):
     rate: float = 17.60
 
 
+class AutoClockoutSettings(BaseModel):
+    enabled: bool = True
+    # Safety net for a forgotten clock-out: a shift still open past this many
+    # hours gets closed automatically. There is no background timer — this is
+    # checked opportunistically whenever the kiosk or admin panel is next
+    # loaded (see repo.auto_close_stale_shifts), so the recorded clock-out is
+    # whenever the app happened to notice, not exactly the threshold.
+    threshold_hours: float = 24.0
+
+
 class Settings(BaseModel):
     break_rules: BreakSettings = Field(default_factory=BreakSettings)
     overtime: OvertimeSettings = Field(default_factory=OvertimeSettings)
     min_wage: MinWageSettings = Field(default_factory=MinWageSettings)
+    auto_clockout: AutoClockoutSettings = Field(default_factory=AutoClockoutSettings)
     # Master list of departments -> valid role titles within them, maintained
     # in Admin > Settings. Populates the department/title dropdowns when
     # assigning roles to an employee (app/templates/admin_employees.html), so

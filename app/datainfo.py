@@ -22,7 +22,9 @@ Back up your data by copying this entire `data` folder somewhere safe.
 An array of employees. Employee NAMES are stored ONLY in this file. Each
 employee has a list of ROLES; one employee can hold several, each with its own
 department and hourly rate (e.g. a cashier in Bowling who's also a bartender
-in Restaurant).
+in Restaurant). "active": false means the employee is HIDDEN from the kiosk
+but kept here for the record (employees are deactivated, never deleted, so
+historical shifts always resolve to a name).
     [
       {
         "id": "a1b2c3d4e5f6", "first_name": "Jane", "last_name": "Doe", "active": true,
@@ -63,13 +65,22 @@ raw "hours" (clock_out - clock_in, not break-adjusted) once clocked out:
         "role_title": "Cashier",
         "department": "Bowling",
         "hourly_rate": 17.6,
-        "hours": 8.5
+        "hours": 8.5,
+        "auto_clocked_out": false,
+        "voided": false
       }
     ]
 A shift with "clock_out": null is still OPEN (the person has not clocked out);
 "hours" stays null until it's closed. Timestamps are local system time in ISO
 8601 (no timezone). Shifts recorded before roles existed have null role_id/
-role_title/department/hourly_rate.
+role_title/department/hourly_rate. "auto_clocked_out": true means the shift
+was closed by the automatic-clock-out safety net (Admin > Settings), not a
+real clock-out — the recorded clock_out is whenever the app happened to
+notice it was left open past the configured threshold (default 24h), not
+necessarily the true end time. "voided": true is a SOFT DELETE — the shift is
+kept here for the record but excluded from payroll, the Shifts summary, and
+clock-state logic; an admin can restore it. Shifts are voided, never removed
+from disk.
 
 ### <YYYY>/week-<YYYY-MM-DD>/adjustments.json  (optional)
 Per-shift unpaid-break overrides, kept out of shifts.json so shift records stay
