@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import datainfo, paths, security, storage
+from . import backup, datainfo, paths, security, singleton, storage
 from .deps import _RedirectException, redirect
 from .routes import admin as admin_routes
 from .routes import kiosk as kiosk_routes
@@ -97,12 +97,20 @@ def _open_browser_when_ready(url: str) -> None:
 
 
 def run() -> None:
+    if not singleton.acquire():
+        print("Employee Shift Tracker is already running on this PC.")
+        print("Use the browser tab / console window that's already open instead")
+        print("of starting a second copy.")
+        input("Press Enter to close this window...")
+        return
+
     port = _find_free_port()
     url = f"http://{HOST}:{port}/"
     _open_browser_when_ready.port = port  # type: ignore[attr-defined]
     print(f"Employee Shift Tracker running at {url}")
     print(f"Data folder: {paths.data_dir()}")
     print("Close this window to stop the server.")
+    backup.start_daily_backup_thread()
     _open_browser_when_ready(url)
     uvicorn.run(app, host=HOST, port=port, log_level="warning")
 

@@ -14,3 +14,4 @@ pydantic==2.10.5          # data models / validation
 
 # Build-time only (not imported by the app; used to produce the .exe)
 pyinstaller==6.11.1
+pillow==12.3.0            # tools/generate_icon.py (regenerates the app icon/favicon)

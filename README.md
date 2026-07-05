@@ -42,6 +42,10 @@ payroll export.
   overtime (>44h at 1.5×), and a minimum-wage reference with warnings.
 - **CSV payroll export** for any date range.
 - **Local-only admin password reset** — no network backdoor.
+- **Automatic daily backup:** while the app is running, a dated copy of the
+  entire `/data` folder is kept in the Windows temp folder
+  (`%TEMP%\EmployeeShiftTrackerBackups\backup-YYYY-MM-DD`), one per calendar
+  day, in addition to any manual backups of `/data` itself.
 
 ---
 

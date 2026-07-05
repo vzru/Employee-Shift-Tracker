@@ -1,8 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Clock In / Out{% endblock %}
+{% block footer %}{% endblock %}
 
 {% block content %}
-<div x-data="kiosk()" class="space-y-6">
+<div x-data="kiosk()" class="space-y-4">
   <div class="flex items-center justify-between">
     <div>
       <h1 class="text-2xl font-bold text-slate-900">Clock In / Out</h1>
@@ -31,20 +32,31 @@
             clocked_in: {{ card.clocked_in | tojson }},
             since: {{ (card.since or "") | tojson }}
           })'
-          class="group flex items-center justify-between rounded-xl border bg-white px-5 py-4 text-left shadow-sm transition
+          {% if card.clocked_in %}
+          {# Clocked-in cards: turn yellow once the running shift passes 12h
+             (live via isLongRunning + the ticking `now`), else stay green. #}
+          :class='isLongRunning({{ card.since | tojson }})
+                    ? "bg-amber-100 border-amber-400 ring-1 ring-amber-300"
+                    : "bg-white border-emerald-300 ring-1 ring-emerald-200"'
+          {% endif %}
+          class="group flex items-center justify-between rounded-xl border px-5 py-3.5 text-left shadow-sm transition
                  {% if card.blocked %}opacity-40 cursor-not-allowed{% else %}hover:shadow-md hover:border-indigo-300{% endif %}
-                 {% if card.clocked_in %}border-emerald-300 ring-1 ring-emerald-200{% else %}border-slate-200{% endif %}">
+                 {% if not card.clocked_in %}bg-white border-slate-200{% endif %}">
           <div class="flex items-center gap-3">
-            <span class="inline-block h-3 w-3 rounded-full {% if card.clocked_in %}bg-emerald-500{% else %}bg-slate-300{% endif %}"></span>
+            <span class="inline-block h-3 w-3 rounded-full {% if not card.clocked_in %}bg-slate-300{% endif %}"
+                  {% if card.clocked_in %}:class='isLongRunning({{ card.since | tojson }}) ? "bg-amber-500" : "bg-emerald-500"'{% endif %}></span>
             <div>
               <div class="font-medium text-slate-900">{{ card.name }}</div>
               <div class="text-xs text-slate-500">{{ card.role_title }}</div>
             </div>
           </div>
-          <span class="text-xs font-semibold uppercase tracking-wide
-                       {% if card.clocked_in %}text-emerald-600{% else %}text-slate-400{% endif %}">
-            {% if card.clocked_in %}In{% else %}Out{% endif %}
-          </span>
+          {% if card.clocked_in %}
+          <span class="text-xs font-semibold uppercase tracking-wide"
+                :class='isLongRunning({{ card.since | tojson }}) ? "text-amber-700" : "text-emerald-600"'
+                x-text='isLongRunning({{ card.since | tojson }}) ? "12h+" : "In"'></span>
+          {% else %}
+          <span class="text-xs font-semibold uppercase tracking-wide text-slate-400">Out</span>
+          {% endif %}
         </button>
         {% endfor %}
       </div>
@@ -138,6 +150,22 @@
       minute: 0,
       ampm: 'AM',
       acknowledgedSignature: '',
+      now: Date.now(),
+
+      init() {
+        // Re-check the "over 12h" highlight each minute so a shift that crosses
+        // 12h while the kiosk sits idle turns yellow without needing a reload.
+        setInterval(() => { this.now = Date.now(); }, 60000);
+      },
+
+      // True when a clocked-in shift has been running more than 12 hours.
+      // `since` is a stored local-naive ISO timestamp; Date.now() is also local.
+      isLongRunning(since) {
+        if (!since) return false;
+        const started = new Date(since).getTime();
+        if (isNaN(started)) return false;
+        return (this.now - started) / 3600000 > 12;
+      },
 
       select(e) {
         this.emp = e;

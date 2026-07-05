@@ -56,7 +56,7 @@
         </template>
         <button type="button" @click="addRole()" class="text-sm text-indigo-600 hover:underline">+ Add another role</button>
       </div>
-      <input type="hidden" name="roles_json" :value="rolesJson">
+      <input type="hidden" name="roles_json" :value="rolesJson()">
     </div>
 
     <div class="sm:col-span-5">
@@ -163,7 +163,7 @@
                 </template>
                 <button type="button" @click="addRole()" class="text-sm text-indigo-600 hover:underline">+ Add another role</button>
               </div>
-              <input type="hidden" name="roles_json" :value="rolesJson">
+              <input type="hidden" name="roles_json" :value="rolesJson()">
             </div>
 
             <div class="sm:col-span-5 flex gap-2">
@@ -206,7 +206,11 @@
         if (role.title && !titles.includes(role.title)) return [role.title, ...titles];
         return titles;
       },
-      get rolesJson() {
+      // A plain method, NOT a getter: this object is spread (...rolesEditor(...))
+      // into the per-row x-data below, and object spread evaluates getters
+      // immediately, freezing their value forever. A method survives spread
+      // as a live function, so it keeps reading the current `this.roles`.
+      rolesJson() {
         return JSON.stringify(this.roles.filter(r => (r.title || '').trim() && (r.department || '').trim()));
       },
     };
