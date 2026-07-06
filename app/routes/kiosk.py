@@ -82,9 +82,9 @@ def dashboard(request: Request, ok: str | None = None, err: str | None = None):
     ]
 
     return templates.TemplateResponse(
+        request,
         "dashboard.html",
         {
-            "request": request,
             "sections": sections,
             # Value for the datetime-local input default (minute precision).
             "now_value": now_local().strftime(TS_FORMAT_MINUTE),

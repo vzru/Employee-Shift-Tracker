@@ -32,7 +32,7 @@ def setup_form(request: Request, err: str | None = None):
     if security.is_admin_configured():
         return redirect("/admin/login")
     return templates.TemplateResponse(
-        "admin_setup.html", {"request": request, "err": err}
+        request, "admin_setup.html", {"err": err}
     )
 
 
@@ -58,7 +58,7 @@ def login_form(request: Request, err: str | None = None):
     if not security.is_admin_configured():
         return redirect("/admin/setup")
     return templates.TemplateResponse(
-        "admin_login.html", {"request": request, "err": err}
+        request, "admin_login.html", {"err": err}
     )
 
 
@@ -110,21 +110,21 @@ def admin_home(request: Request, _: bool = Depends(require_admin)):
         if e.active and any(r.hourly_rate < settings.min_wage.rate for r in e.roles)
     ]
 
-    # Deep safety-net scan across ALL weeks on disk for shifts open 12h+ (a
-    # likely forgotten clock-out), catching any that outran the routine window.
+    # Safety-net alert: shifts open 12h+ (a likely forgotten clock-out),
+    # derived from the sweep's open map — no extra file reads.
     long_open = []
-    for item in repo.find_long_open_shifts(repo.LONG_OPEN_HOURS):
+    for item in repo.long_open_shifts(open_map, repo.LONG_OPEN_HOURS):
         long_open.append({
             "name": names.get(item["employee_id"], f"(unknown {item['employee_id']})"),
             "hours_open": item["hours_open"],
             "role_title": item["role_title"] or "—",
-            "week_start": item["week_start"].isoformat(),
+            "clock_in": item["clock_in"].replace("T", " "),
         })
 
     return templates.TemplateResponse(
+        request,
         "admin_home.html",
         {
-            "request": request,
             "employee_count": len([e for e in employees if e.active]),
             "clocked_in_count": len(open_map),
             "below_min_wage": below,
@@ -147,9 +147,9 @@ def employees_page(
 ):
     settings = repo.load_settings()
     return templates.TemplateResponse(
+        request,
         "admin_employees.html",
         {
-            "request": request,
             "employees": repo.load_employees(),
             "min_wage": settings.min_wage.rate,
             "role_catalog": settings.role_catalog,
@@ -351,9 +351,9 @@ def shifts_page(
         })
 
     return templates.TemplateResponse(
+        request,
         "admin_shifts.html",
         {
-            "request": request,
             "week_start": ws, "week_end": we,
             "prev_week_start": ws - timedelta(days=7),
             "next_week_start": ws + timedelta(days=7),
@@ -503,8 +503,9 @@ def settings_page(
     _: bool = Depends(require_admin),
 ):
     return templates.TemplateResponse(
+        request,
         "admin_settings.html",
-        {"request": request, "s": repo.load_settings(), "ok": ok, "err": err},
+        {"s": repo.load_settings(), "ok": ok, "err": err},
     )
 
 
@@ -602,9 +603,9 @@ def payroll_page(
             err = str(exc)
 
     return templates.TemplateResponse(
+        request,
         "admin_payroll.html",
         {
-            "request": request,
             "rows": rows,
             "start": start or "",
             "end": end or "",
@@ -646,9 +647,9 @@ def holiday_page(
             err = "Enter a valid holiday date."
 
     return templates.TemplateResponse(
+        request,
         "admin_holiday.html",
         {
-            "request": request,
             "holiday": holiday or "",
             "rows": rows,
             "window_start": window_start,

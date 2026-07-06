@@ -10,7 +10,7 @@
   clock-out — check and correct the end time in <a href="/admin/shifts" class="underline">Shifts</a>.
   <ul class="mt-1 list-disc pl-5">
     {% for s in long_open_shifts %}
-    <li>{{ s.name }} — {{ s.role_title }}, open {{ '%.1f'|format(s.hours_open) }}h (week of {{ s.week_start }})</li>
+    <li>{{ s.name }} — {{ s.role_title }}, open {{ '%.1f'|format(s.hours_open) }}h (since {{ s.clock_in }})</li>
     {% endfor %}
   </ul>
 </div>

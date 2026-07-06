@@ -14,16 +14,16 @@ from . import audit, paths, storage
 from .models import AdminData, Employee, Settings, Shift
 from .timeutil import hours_between, now_local, parse_iso, to_iso, week_start_for
 
-# How many work weeks back the ROUTINE open-shift scan looks (clock actions,
-# kiosk/admin page sweeps). Generous enough to cover any realistic forgotten
-# clock-out while auto-clockout is enabled, without reading the whole history
-# on every page load. Shifts left open even longer are caught separately by
-# find_long_open_shifts(), which scans all of disk and warns the admin.
+# How many work weeks back the open-shift scan looks (clock actions, kiosk/admin
+# page sweeps, and the admin's 12h+ alert). Generous enough to cover any
+# realistic forgotten clock-out while auto-clockout is enabled, without reading
+# the whole history on every page load.
 _OPEN_SCAN_WEEKS = 6
 
-# A currently-open shift running at least this long is surfaced to the admin as
-# a specific warning (it may be a forgotten clock-out). Matches the kiosk's
-# 12-hour card highlight, and fires before auto-clockout's 24h default.
+# A currently-open shift (within the routine scan window) running at least this
+# long is surfaced to the admin as a specific warning (it may be a forgotten
+# clock-out). Matches the kiosk's 12-hour card highlight, and fires before
+# auto-clockout's 24h default.
 LONG_OPEN_HOURS = 12.0
 
 
@@ -131,30 +131,6 @@ def _recent_week_keys(count: int = _OPEN_SCAN_WEEKS, wsw: int | None = None) -> 
     return keys
 
 
-def _week_starts_on_disk() -> list[date]:
-    """Every week folder's start date present on disk, newest first.
-
-    Bounded by how long the business has run, not by the routine scan window —
-    used by find_long_open_shifts so a shift left open beyond _OPEN_SCAN_WEEKS
-    is still found.
-    """
-    root = paths.data_dir()
-    starts: list[date] = []
-    if not root.exists():
-        return starts
-    for year_dir in root.iterdir():
-        if not (year_dir.is_dir() and year_dir.name.isdigit()):
-            continue
-        for week_dir in year_dir.iterdir():
-            if not (week_dir.is_dir() and week_dir.name.startswith("week-")):
-                continue
-            try:
-                starts.append(date.fromisoformat(week_dir.name[len("week-"):]))
-            except ValueError:
-                continue
-    return sorted(starts, reverse=True)
-
-
 def find_open_shift(employee_id: str, wsw: int | None = None) -> Optional[tuple[date, Shift]]:
     """
     Locate an employee's currently-open shift (clock_out is None), scanning the
@@ -179,30 +155,30 @@ def open_shifts_by_employee(wsw: int | None = None) -> dict[str, Shift]:
     return result
 
 
-def find_long_open_shifts(min_hours: float = LONG_OPEN_HOURS) -> list[dict]:
+def long_open_shifts(
+    open_map: dict[str, Shift], min_hours: float = LONG_OPEN_HOURS,
+) -> list[dict]:
     """
-    Every currently-open (not clocked out, not voided) shift that has been
-    running at least ``min_hours``, scanning ALL week folders on disk so a
-    shift left open beyond the routine scan window is never missed. Returns
-    dicts with the employee id, shift location and how long it's been open,
-    sorted longest-open first. Read-only; names are resolved by the caller.
+    From an employee_id -> open Shift map (as returned by
+    sweep_and_open_shifts, covering the recent scan window), the shifts that
+    have been open at least ``min_hours`` — a likely forgotten clock-out.
+    Returns dicts with the employee id, shift location and how long it's been
+    open, sorted longest-open first. Pure (no I/O); names are resolved by the
+    caller.
     """
     now = now_local()
     out: list[dict] = []
-    for week_start in _week_starts_on_disk():
-        for s in load_week_shifts(week_start):
-            if s.clock_out is None and not s.voided:
-                hours_open = (now - parse_iso(s.clock_in)).total_seconds() / 3600.0
-                if hours_open >= min_hours:
-                    out.append({
-                        "employee_id": s.employee_id,
-                        "shift_id": s.id,
-                        "week_start": week_start,
-                        "clock_in": s.clock_in,
-                        "hours_open": hours_open,
-                        "role_title": s.role_title,
-                        "department": s.department,
-                    })
+    for shift in open_map.values():
+        hours_open = (now - parse_iso(shift.clock_in)).total_seconds() / 3600.0
+        if hours_open >= min_hours:
+            out.append({
+                "employee_id": shift.employee_id,
+                "shift_id": shift.id,
+                "clock_in": shift.clock_in,
+                "hours_open": hours_open,
+                "role_title": shift.role_title,
+                "department": shift.department,
+            })
     out.sort(key=lambda x: x["hours_open"], reverse=True)
     return out
 
