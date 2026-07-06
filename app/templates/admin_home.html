@@ -3,6 +3,19 @@
 {% block content %}
 <h1 class="text-2xl font-bold text-slate-900">Admin panel</h1>
 
+{% if long_open_shifts %}
+<div class="mt-4 rounded-lg border border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+  <strong>Still clocked in {{ '%g'|format(long_open_hours) }}h+:</strong>
+  {{ long_open_shifts|length }} shift(s) have been open a long time and may be a forgotten
+  clock-out — check and correct the end time in <a href="/admin/shifts" class="underline">Shifts</a>.
+  <ul class="mt-1 list-disc pl-5">
+    {% for s in long_open_shifts %}
+    <li>{{ s.name }} — {{ s.role_title }}, open {{ '%.1f'|format(s.hours_open) }}h (week of {{ s.week_start }})</li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 {% if misaligned_weeks %}
 <div class="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
   <strong>Data warning:</strong> {{ misaligned_weeks|length }} week folder(s) on disk don't match the

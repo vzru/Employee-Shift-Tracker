@@ -100,14 +100,27 @@ def change_password(
 
 @router.get("")
 def admin_home(request: Request, _: bool = Depends(require_admin)):
-    repo.auto_close_stale_shifts()
-    employees = repo.load_employees()
-    open_map = repo.open_shifts_by_employee()
     settings = repo.load_settings()
+    # One pass: auto-close stale shifts and get the current open map.
+    _closed, open_map = repo.sweep_and_open_shifts(settings)
+    employees = repo.load_employees()
+    names = {e.id: e.name for e in employees}
     below = [
         e for e in employees
         if e.active and any(r.hourly_rate < settings.min_wage.rate for r in e.roles)
     ]
+
+    # Deep safety-net scan across ALL weeks on disk for shifts open 12h+ (a
+    # likely forgotten clock-out), catching any that outran the routine window.
+    long_open = []
+    for item in repo.find_long_open_shifts(repo.LONG_OPEN_HOURS):
+        long_open.append({
+            "name": names.get(item["employee_id"], f"(unknown {item['employee_id']})"),
+            "hours_open": item["hours_open"],
+            "role_title": item["role_title"] or "—",
+            "week_start": item["week_start"].isoformat(),
+        })
+
     return templates.TemplateResponse(
         "admin_home.html",
         {
@@ -119,6 +132,8 @@ def admin_home(request: Request, _: bool = Depends(require_admin)):
             # Week folders stored under a different week-start scheme than the
             # current setting — invisible to Shifts/payroll until migrated.
             "misaligned_weeks": repo.find_misaligned_week_folders(),
+            "long_open_shifts": long_open,
+            "long_open_hours": repo.LONG_OPEN_HOURS,
         },
     )
 
@@ -295,8 +310,9 @@ def shifts_page(
     err: str | None = None,
     _: bool = Depends(require_admin),
 ):
-    repo.auto_close_stale_shifts()
-    wsw = repo.load_settings().overtime.week_start_weekday
+    settings = repo.load_settings()
+    repo.auto_close_stale_shifts(settings)
+    wsw = settings.overtime.week_start_weekday
     # Resolve whatever date was passed (any day, not necessarily a week start)
     # to the week containing it; default to today if missing/unparseable.
     try:

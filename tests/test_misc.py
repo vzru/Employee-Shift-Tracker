@@ -63,10 +63,25 @@ class TestMain:
 
     def test_find_free_port_prefers_first_when_all_free(self):
         # With nothing bound, it returns the first preferred port.
-        # (NB: the probe uses SO_REUSEADDR, so on Windows it can't reliably
-        # detect a port another SO_REUSEADDR socket holds — but the
-        # single-instance mutex means a 2nd instance never reaches here.)
         assert main._find_free_port() == main.PREFERRED_PORTS[0]
+
+    def test_find_free_port_skips_busy_preferred(self):
+        # Occupy the first preferred port with a real listener; the probe must
+        # now correctly detect it as busy and pick a different port.
+        busy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            busy.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        busy.bind((main.HOST, main.PREFERRED_PORTS[0]))
+        busy.listen(1)
+        try:
+            assert not main._port_is_free(main.PREFERRED_PORTS[0])
+            assert main._find_free_port() != main.PREFERRED_PORTS[0]
+        finally:
+            busy.close()
+
+    def test_port_is_free_true_for_unused(self):
+        assert main._port_is_free(main.PREFERRED_PORTS[0]) is True
 
     def test_create_app_builds(self, data_dir):
         app = main.create_app()

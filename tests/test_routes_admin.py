@@ -72,6 +72,22 @@ class TestAdminHome:
         html = admin_client.get("/admin").text
         assert "below the minimum wage" in html
 
+    def test_long_open_shift_banner(self, admin_client, make_employee, make_shift):
+        import datetime
+        make_employee(first="Forgot", last="Out")
+        ci = (datetime.datetime.now() - datetime.timedelta(hours=20)).strftime("%Y-%m-%dT%H:%M:%S")
+        make_shift(ci, None)
+        html = admin_client.get("/admin").text
+        assert "Still clocked in" in html
+        assert "Forgot Out" in html
+
+    def test_no_banner_for_short_open_shift(self, admin_client, make_employee, make_shift):
+        import datetime
+        make_employee()
+        ci = (datetime.datetime.now() - datetime.timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%S")
+        make_shift(ci, None)
+        assert "Still clocked in" not in admin_client.get("/admin").text
+
 
 # --- Employees ---------------------------------------------------------------
 

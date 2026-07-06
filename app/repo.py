@@ -14,10 +14,17 @@ from . import audit, paths, storage
 from .models import AdminData, Employee, Settings, Shift
 from .timeutil import hours_between, now_local, parse_iso, to_iso, week_start_for
 
-# How many work weeks back to scan when locating open shifts (covers shifts
-# that span a week boundary, e.g. an overnight shift started late on the last
-# day of the work week).
-_OPEN_SCAN_WEEKS = 3
+# How many work weeks back the ROUTINE open-shift scan looks (clock actions,
+# kiosk/admin page sweeps). Generous enough to cover any realistic forgotten
+# clock-out while auto-clockout is enabled, without reading the whole history
+# on every page load. Shifts left open even longer are caught separately by
+# find_long_open_shifts(), which scans all of disk and warns the admin.
+_OPEN_SCAN_WEEKS = 6
+
+# A currently-open shift running at least this long is surfaced to the admin as
+# a specific warning (it may be a forgotten clock-out). Matches the kiosk's
+# 12-hour card highlight, and fires before auto-clockout's 24h default.
+LONG_OPEN_HOURS = 12.0
 
 
 def new_id() -> str:
@@ -108,9 +115,14 @@ def _week_start_weekday() -> int:
     return load_settings().overtime.week_start_weekday
 
 
-def _recent_week_keys(count: int = _OPEN_SCAN_WEEKS) -> list[date]:
-    """Start dates of the current work week and the prior ``count-1`` weeks."""
-    wsw = _week_start_weekday()
+def _recent_week_keys(count: int = _OPEN_SCAN_WEEKS, wsw: int | None = None) -> list[date]:
+    """Start dates of the current work week and the prior ``count-1`` weeks.
+
+    ``wsw`` (week-start weekday) can be passed by callers that already loaded
+    settings, to avoid re-reading admin.json.
+    """
+    if wsw is None:
+        wsw = _week_start_weekday()
     cursor = now_local()
     keys = [week_start_for(cursor, wsw)]
     for _ in range(count - 1):
@@ -119,28 +131,80 @@ def _recent_week_keys(count: int = _OPEN_SCAN_WEEKS) -> list[date]:
     return keys
 
 
-def find_open_shift(employee_id: str) -> Optional[tuple[date, Shift]]:
+def _week_starts_on_disk() -> list[date]:
+    """Every week folder's start date present on disk, newest first.
+
+    Bounded by how long the business has run, not by the routine scan window —
+    used by find_long_open_shifts so a shift left open beyond _OPEN_SCAN_WEEKS
+    is still found.
+    """
+    root = paths.data_dir()
+    starts: list[date] = []
+    if not root.exists():
+        return starts
+    for year_dir in root.iterdir():
+        if not (year_dir.is_dir() and year_dir.name.isdigit()):
+            continue
+        for week_dir in year_dir.iterdir():
+            if not (week_dir.is_dir() and week_dir.name.startswith("week-")):
+                continue
+            try:
+                starts.append(date.fromisoformat(week_dir.name[len("week-"):]))
+            except ValueError:
+                continue
+    return sorted(starts, reverse=True)
+
+
+def find_open_shift(employee_id: str, wsw: int | None = None) -> Optional[tuple[date, Shift]]:
     """
     Locate an employee's currently-open shift (clock_out is None), scanning the
     most recent weeks. Returns (week_start, shift) or None. Voided shifts are
     ignored — a voided shift is treated as if removed for clock-state purposes.
     """
-    for week_start in _recent_week_keys():
+    for week_start in _recent_week_keys(wsw=wsw):
         for s in load_week_shifts(week_start):
             if s.employee_id == employee_id and s.clock_out is None and not s.voided:
                 return (week_start, s)
     return None
 
 
-def open_shifts_by_employee() -> dict[str, Shift]:
+def open_shifts_by_employee(wsw: int | None = None) -> dict[str, Shift]:
     """Map employee_id -> their open Shift, across recent weeks (for the kiosk).
     Voided shifts are ignored."""
     result: dict[str, Shift] = {}
-    for week_start in _recent_week_keys():
+    for week_start in _recent_week_keys(wsw=wsw):
         for s in load_week_shifts(week_start):
             if s.clock_out is None and not s.voided and s.employee_id not in result:
                 result[s.employee_id] = s
     return result
+
+
+def find_long_open_shifts(min_hours: float = LONG_OPEN_HOURS) -> list[dict]:
+    """
+    Every currently-open (not clocked out, not voided) shift that has been
+    running at least ``min_hours``, scanning ALL week folders on disk so a
+    shift left open beyond the routine scan window is never missed. Returns
+    dicts with the employee id, shift location and how long it's been open,
+    sorted longest-open first. Read-only; names are resolved by the caller.
+    """
+    now = now_local()
+    out: list[dict] = []
+    for week_start in _week_starts_on_disk():
+        for s in load_week_shifts(week_start):
+            if s.clock_out is None and not s.voided:
+                hours_open = (now - parse_iso(s.clock_in)).total_seconds() / 3600.0
+                if hours_open >= min_hours:
+                    out.append({
+                        "employee_id": s.employee_id,
+                        "shift_id": s.id,
+                        "week_start": week_start,
+                        "clock_in": s.clock_in,
+                        "hours_open": hours_open,
+                        "role_title": s.role_title,
+                        "department": s.department,
+                    })
+    out.sort(key=lambda x: x["hours_open"], reverse=True)
+    return out
 
 
 def find_misaligned_week_folders() -> list[str]:
@@ -172,43 +236,60 @@ def find_misaligned_week_folders() -> list[str]:
     return sorted(misaligned)
 
 
-def auto_close_stale_shifts() -> list[Shift]:
+def sweep_and_open_shifts(
+    settings: Optional[Settings] = None,
+) -> tuple[list[Shift], dict[str, Shift]]:
     """
-    Safety net: close any shift that's been open longer than
-    Settings.auto_clockout.threshold_hours, recording the actual time this
-    was noticed (there's no background timer — callers invoke this
-    opportunistically on page load: the kiosk main page and the admin
-    home/Shifts pages; a clock in/out redirects to the main page which sweeps
-    there). Voided shifts are skipped. Returns the shifts that were closed;
-    each is logged to the audit trail as actor "system".
-    """
-    settings = load_settings()
-    ac = settings.auto_clockout
-    if not ac.enabled:
-        return []
+    In ONE pass over the recent weeks: auto-close any shift left open past
+    Settings.auto_clockout.threshold_hours, and return
+    (closed_shifts, open_by_employee) for the remaining state — so a page can
+    sweep and read the current open shifts without scanning the files twice.
 
+    Only weeks that actually have a stale shift are rewritten, and each such
+    write goes through storage.update_json (atomic, re-checked under the lock)
+    so a concurrent clock action can't be clobbered. There's no background
+    timer; callers invoke this opportunistically on page load. Closed shifts
+    are logged to the audit trail as actor "system".
+    """
+    if settings is None:
+        settings = load_settings()
+    ac = settings.auto_clockout
+    wsw = settings.overtime.week_start_weekday
     now = now_local()
     now_iso = to_iso(now)
     closed: list[Shift] = []
+    open_map: dict[str, Shift] = {}
 
-    for week_start in _recent_week_keys():
-        newly_closed_ids: list[str] = []
+    for week_start in _recent_week_keys(wsw=wsw):
+        raw = _load_week_shifts_raw(week_start)  # single read per week
 
-        def mutator(current: list[dict]) -> list[dict]:
-            for s in current:
-                if s.get("clock_out") is not None or s.get("voided"):
-                    continue
-                elapsed_hours = (now - parse_iso(s["clock_in"])).total_seconds() / 3600.0
-                if elapsed_hours > ac.threshold_hours:
-                    s["clock_out"] = now_iso
-                    s["hours"] = round(hours_between(s["clock_in"], now_iso), 2)
-                    s["auto_clocked_out"] = True
-                    newly_closed_ids.append(s["id"])
-            return current
+        # Detect stale open shifts (only if auto-clockout is enabled).
+        stale_ids = {
+            s["id"] for s in raw
+            if ac.enabled and s.get("clock_out") is None and not s.get("voided")
+            and (now - parse_iso(s["clock_in"])).total_seconds() / 3600.0 > ac.threshold_hours
+        }
 
-        result = storage.update_json(paths.shifts_file(week_start), default=[], mutator=mutator)
-        if newly_closed_ids:
-            closed.extend(Shift(**s) for s in result if s["id"] in newly_closed_ids)
+        if stale_ids:
+            def mutator(current: list[dict], _ids=stale_ids) -> list[dict]:
+                for s in current:
+                    # Re-check clock_out under the lock so a clock-out that
+                    # landed between our read and this write isn't overwritten.
+                    if s["id"] in _ids and s.get("clock_out") is None:
+                        s["clock_out"] = now_iso
+                        s["hours"] = round(hours_between(s["clock_in"], now_iso), 2)
+                        s["auto_clocked_out"] = True
+                return current
+
+            raw = storage.update_json(paths.shifts_file(week_start), default=[], mutator=mutator)
+
+        for s in raw:
+            if s.get("voided"):
+                continue
+            if s.get("clock_out") is None:
+                open_map.setdefault(s["employee_id"], Shift(**s))
+            elif s["id"] in stale_ids and s.get("auto_clocked_out"):
+                closed.append(Shift(**s))
 
     for shift in closed:
         audit.log(
@@ -216,10 +297,20 @@ def auto_close_stale_shifts() -> list[Shift]:
             shift_id=shift.id, employee_id=shift.employee_id,
             clock_in=shift.clock_in, clock_out=shift.clock_out, hours=shift.hours,
         )
+    return closed, open_map
+
+
+def auto_close_stale_shifts(settings: Optional[Settings] = None) -> list[Shift]:
+    """Close stale open shifts and return them (see sweep_and_open_shifts).
+    Kept for callers that only need the sweep, not the open map."""
+    closed, _ = sweep_and_open_shifts(settings)
     return closed
 
 
-def clock_in(employee_id: str, timestamp_iso: str, role_id: str) -> Shift:
+def clock_in(
+    employee_id: str, timestamp_iso: str, role_id: str,
+    wsw: int | None = None, employee: Optional[Employee] = None,
+) -> Shift:
     """
     Open a new shift for the employee, working ``role_id``, at
     ``timestamp_iso``. Refuses if the employee already has an open shift. The
@@ -228,11 +319,17 @@ def clock_in(employee_id: str, timestamp_iso: str, role_id: str) -> Shift:
     The new shift is filed in the work week (see
     Settings.overtime.week_start_weekday) of its clock-in time. Atomic under
     the storage lock.
+
+    ``wsw`` and ``employee`` may be passed by a caller that already loaded
+    them (e.g. the kiosk /clock handler) to avoid re-reading settings/employees.
     """
-    if find_open_shift(employee_id) is not None:
+    if wsw is None:
+        wsw = _week_start_weekday()
+    if find_open_shift(employee_id, wsw) is not None:
         raise ValueError("Employee is already clocked in.")
 
-    employee = get_employee(employee_id)
+    if employee is None:
+        employee = get_employee(employee_id)
     if employee is None:
         raise ValueError("Unknown employee.")
     role = next((r for r in employee.roles if r.id == role_id), None)
@@ -240,7 +337,7 @@ def clock_in(employee_id: str, timestamp_iso: str, role_id: str) -> Shift:
         raise ValueError("Unknown role.")
 
     when = parse_iso(timestamp_iso)
-    week_start = week_start_for(when, _week_start_weekday())
+    week_start = week_start_for(when, wsw)
     shift = Shift(
         id=new_id(),
         employee_id=employee_id,
@@ -260,13 +357,20 @@ def clock_in(employee_id: str, timestamp_iso: str, role_id: str) -> Shift:
     return shift
 
 
-def clock_out(employee_id: str, timestamp_iso: str) -> Shift:
+def clock_out(
+    employee_id: str, timestamp_iso: str,
+    wsw: int | None = None,
+    located: Optional[tuple[date, Shift]] = None,
+) -> Shift:
     """
     Close the employee's open shift at ``timestamp_iso``. Validates that the
     clock-out is not before the clock-in, and fills in the shift's raw "hours"
     (clock_out - clock_in, not break-adjusted). Atomic under the storage lock.
+
+    ``located`` may be passed by a caller that already found the open shift
+    (the kiosk /clock handler) to skip re-scanning for it.
     """
-    found = find_open_shift(employee_id)
+    found = located if located is not None else find_open_shift(employee_id, wsw)
     if found is None:
         raise ValueError("Employee is not clocked in.")
     week_start, shift = found

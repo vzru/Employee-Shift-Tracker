@@ -185,6 +185,102 @@ class TestAutoClose:
         assert "shift_auto_clocked_out" in log
 
 
+class TestScanWindow:
+    def test_routine_scan_is_six_weeks(self):
+        assert repo._OPEN_SCAN_WEEKS == 6
+
+    def test_find_open_shift_reaches_five_weeks_back(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        ci = timeutil.to_iso(timeutil.now_local() - timedelta(weeks=5))
+        make_shift(ci, None)
+        assert repo.find_open_shift("e1") is not None  # within the 6-week window
+
+    def test_find_open_shift_misses_eight_weeks_back(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        ci = timeutil.to_iso(timeutil.now_local() - timedelta(weeks=8))
+        make_shift(ci, None)
+        # Outside the routine window — the deep scan (below) is what catches it.
+        assert repo.find_open_shift("e1") is None
+
+
+class TestLongOpenShifts:
+    def test_finds_shift_open_beyond_scan_window(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        ci = timeutil.to_iso(timeutil.now_local() - timedelta(weeks=8))
+        make_shift(ci, None)
+        found = repo.find_long_open_shifts(12.0)
+        assert len(found) == 1
+        assert found[0]["employee_id"] == "e1"
+        assert found[0]["hours_open"] > 12
+
+    def test_respects_min_hours(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        ci = timeutil.to_iso(timeutil.now_local() - timedelta(hours=5))
+        make_shift(ci, None)
+        assert repo.find_long_open_shifts(12.0) == []
+
+    def test_ignores_closed_and_voided(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        old = timeutil.to_iso(timeutil.now_local() - timedelta(hours=20))
+        make_shift(old, timeutil.to_iso(timeutil.now_local()))         # closed
+        make_shift(old, None, voided=True)                            # voided
+        assert repo.find_long_open_shifts(12.0) == []
+
+    def test_sorted_longest_first(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee(emp_id="e1")
+        make_employee(emp_id="e2", first="Sam", last="Lee")
+        make_shift(timeutil.to_iso(timeutil.now_local() - timedelta(hours=15)), None, emp_id="e1")
+        make_shift(timeutil.to_iso(timeutil.now_local() - timedelta(hours=30)), None, emp_id="e2")
+        found = repo.find_long_open_shifts(12.0)
+        assert [f["employee_id"] for f in found] == ["e2", "e1"]
+
+    def test_week_starts_on_disk_newest_first(self, make_shift, settings_writer):
+        settings_writer()
+        make_shift("2026-06-01T09:00:00", "2026-06-01T17:00:00")
+        make_shift("2026-07-01T09:00:00", "2026-07-01T17:00:00")
+        starts = repo._week_starts_on_disk()
+        assert starts == sorted(starts, reverse=True)
+        assert len(starts) == 2
+
+
+class TestSweepAndOpenShifts:
+    def test_returns_open_map_and_closes_stale(self, make_employee, make_shift, settings_writer):
+        settings_writer(auto_enabled=True, auto_threshold=24.0)
+        make_employee(emp_id="e1")
+        make_employee(emp_id="e2", first="Sam", last="Lee")
+        make_shift(timeutil.to_iso(timeutil.now_local() - timedelta(hours=30)), None, emp_id="e1")  # stale
+        make_shift(timeutil.to_iso(timeutil.now_local() - timedelta(hours=2)), None, emp_id="e2")   # fresh
+        closed, open_map = repo.sweep_and_open_shifts()
+        assert [c.employee_id for c in closed] == ["e1"]
+        assert set(open_map.keys()) == {"e2"}   # e1 got closed, only e2 still open
+
+    def test_no_write_when_nothing_stale(self, data_dir, make_employee, make_shift, settings_writer):
+        # With auto-clockout off, an old open shift is left untouched — and the
+        # week file must not be rewritten (optimization: only write on change).
+        settings_writer(auto_enabled=False)
+        make_employee()
+        make_shift(timeutil.to_iso(timeutil.now_local() - timedelta(hours=50)), None)
+        week_file = data_dir / "2026" / f"week-{repo._week_starts_on_disk()[0].isoformat()}" / "shifts.json"
+        before = week_file.read_bytes()
+        closed, open_map = repo.sweep_and_open_shifts()
+        assert closed == []
+        assert "e1" in open_map
+        assert week_file.read_bytes() == before  # untouched
+
+    def test_open_map_excludes_voided(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        make_shift(timeutil.to_iso(timeutil.now_local() - timedelta(hours=1)), None, voided=True)
+        _closed, open_map = repo.sweep_and_open_shifts()
+        assert open_map == {}
+
+
 # --- Misaligned week folders -------------------------------------------------
 
 class TestMisalignedWeeks:

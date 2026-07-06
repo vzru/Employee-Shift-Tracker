@@ -31,9 +31,10 @@ _MAX_PAST = timedelta(days=7)
 
 @router.get("/")
 def dashboard(request: Request, ok: str | None = None, err: str | None = None):
-    repo.auto_close_stale_shifts()
+    # One pass: auto-close stale shifts AND get the current open map (avoids
+    # scanning the week files twice).
+    _closed, open_map = repo.sweep_and_open_shifts()
     employees = [e for e in repo.load_employees() if e.active]
-    open_map = repo.open_shifts_by_employee()  # employee_id -> open Shift
 
     cards = []
     for e in employees:
@@ -121,6 +122,9 @@ def clock(
     if sec_fetch_site and sec_fetch_site not in ("same-origin", "none"):
         return RedirectResponse("/?err=Blocked+cross-site+request", status_code=303)
 
+    # Load settings and the employee once and reuse them below (avoids
+    # re-reading admin.json / employees.json several times per clock action).
+    wsw = repo.load_settings().overtime.week_start_weekday
     employee = repo.get_employee(employee_id)
     if employee is None:
         return RedirectResponse("/?err=Unknown+employee", status_code=303)
@@ -146,8 +150,9 @@ def clock(
         )
 
     try:
-        if repo.find_open_shift(employee_id) is not None:
-            shift = repo.clock_out(employee_id, stamp)
+        found = repo.find_open_shift(employee_id, wsw)
+        if found is not None:
+            shift = repo.clock_out(employee_id, stamp, located=found)
             audit.log(
                 "clock_out", "kiosk", employee_id=employee_id, name=employee.name,
                 shift_id=shift.id, timestamp=stamp,
@@ -156,7 +161,7 @@ def clock(
         else:
             if not role_id:
                 return RedirectResponse("/?err=Choose+a+role", status_code=303)
-            shift = repo.clock_in(employee_id, stamp, role_id)
+            shift = repo.clock_in(employee_id, stamp, role_id, wsw=wsw, employee=employee)
             audit.log(
                 "clock_in", "kiosk", employee_id=employee_id, name=employee.name,
                 shift_id=shift.id, role_id=role_id, role_title=shift.role_title,

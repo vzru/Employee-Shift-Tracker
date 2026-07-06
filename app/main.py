@@ -27,6 +27,12 @@ from .routes import kiosk as kiosk_routes
 HOST = "127.0.0.1"
 PREFERRED_PORTS = [8765, 8766, 8767, 8000, 8080]
 
+# Admin session idle timeout. SessionMiddleware re-stamps the signed cookie on
+# every response that carries session data, so max_age acts as a SLIDING idle
+# window: the admin is logged out only after this many seconds with no request
+# from their browser. The kiosk has no session, so it's unaffected.
+SESSION_IDLE_SECONDS = 30 * 60
+
 
 def create_app() -> FastAPI:
     # Make sure /data exists (next to the exe) and document its schema.
@@ -36,9 +42,11 @@ def create_app() -> FastAPI:
     app = FastAPI(title="Employee Shift Tracker", docs_url=None, redoc_url=None)
 
     # Signed session cookies for the admin login (secret persisted in /data).
+    # max_age gives a 30-minute idle logout (see SESSION_IDLE_SECONDS).
     app.add_middleware(
         SessionMiddleware,
         secret_key=security.get_session_secret(),
+        max_age=SESSION_IDLE_SECONDS,
         same_site="lax",
         https_only=False,  # local http only
     )
@@ -65,17 +73,38 @@ app = create_app()
 
 # --- Standalone launch -------------------------------------------------------
 
+def _port_is_free(port: int) -> bool:
+    """
+    True if we could start a server on ``port`` right now.
+
+    Deliberately does NOT set SO_REUSEADDR: on Windows that flag lets a bind
+    "succeed" on a port another SO_REUSEADDR socket is already using, so the
+    probe would wrongly report a busy port as free. Where available (Windows)
+    SO_EXCLUSIVEADDRUSE is set so the bind fails if anyone holds the port at
+    all. The probe socket is closed immediately (it never accepts a
+    connection, so it leaves no TIME_WAIT behind).
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            try:
+                s.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+            except OSError:
+                pass
+        try:
+            s.bind((HOST, port))
+            s.listen(1)
+            return True
+        except OSError:
+            return False
+
+
 def _find_free_port() -> int:
     """Return the first preferred port that is free, else an OS-assigned one."""
     for port in PREFERRED_PORTS:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                s.bind((HOST, port))
-                return port
-            except OSError:
-                continue  # busy, try the next
-    # Fall back to any free ephemeral port.
+        if _port_is_free(port):
+            return port
+    # Fall back to any free ephemeral port (0 => OS assigns a free one).
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, 0))
         return s.getsockname()[1]
