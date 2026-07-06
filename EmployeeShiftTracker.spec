@@ -41,7 +41,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=["tkinter"],  # not used; trims size
+    # Not used at runtime; trims size. pytest/pygments/PIL are dev-only deps
+    # that anyio.pytest_plugin (swept in by collect_submodules("anyio")) would
+    # otherwise drag into the bundle now that they're installed in the venv.
+    excludes=["tkinter", "pytest", "_pytest", "pygments", "PIL"],
     noarchive=False,
 )
 

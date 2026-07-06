@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Holiday pay{% endblock %}
+{% block content %}
+<div class="flex items-center justify-between">
+  <h1 class="text-2xl font-bold text-slate-900">Public holiday pay</h1>
+  <a href="/admin" class="text-sm text-indigo-600 hover:underline">&larr; Back to admin</a>
+</div>
+
+<div class="mt-3 rounded-lg border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+  Ontario ESA formula: <strong>regular wages earned in the four work weeks before the work week with
+  the holiday, plus the vacation pay payable on those wages, divided by 20.</strong>
+  These are estimates — overtime pay is excluded per the ESA, and <em>eligibility</em> (e.g. the
+  "last and first" rule) is not checked; you decide who qualifies. Ontario has 9 public holidays:
+  New Year's Day, Family Day, Good Friday, Victoria Day, Canada Day, Labour Day, Thanksgiving,
+  Christmas Day and Boxing Day.
+</div>
+
+<form method="get" action="/admin/holiday" class="mt-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-5">
+  <label class="block">
+    <span class="text-sm font-medium text-slate-700">Holiday date</span>
+    <input type="date" name="holiday" value="{{ holiday }}" required class="mt-1 rounded-lg border border-slate-300 px-3 py-2">
+  </label>
+  <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 font-medium text-white hover:bg-indigo-500">Calculate</button>
+</form>
+
+{% if err %}
+<div class="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-red-800">{{ err }}</div>
+{% endif %}
+
+{% if rows is not none %}
+<p class="mt-4 text-sm text-slate-500">
+  Wage window used: <strong>{{ window_start.strftime('%b %d, %Y') }}</strong> to
+  <strong>{{ window_end.strftime('%b %d, %Y') }}</strong> (the four work weeks before the week with the holiday).
+</p>
+
+<div class="mt-3 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+  <table class="min-w-full divide-y divide-slate-200 text-sm">
+    <thead class="bg-slate-50 text-left text-slate-500">
+      <tr>
+        <th class="px-4 py-3 font-medium">Employee</th>
+        <th class="px-4 py-3 font-medium text-right">Regular wages (4 wks)</th>
+        <th class="px-4 py-3 font-medium text-right">+ Vacation pay</th>
+        <th class="px-4 py-3 font-medium text-right">Holiday pay (&divide; 20)</th>
+        <th class="px-4 py-3 font-medium">Flags</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-slate-100">
+      {% for r in rows %}
+      <tr>
+        <td class="px-4 py-3 font-medium text-slate-900">{{ r.name }}</td>
+        <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.regular_wages) }}</td>
+        <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.vacation_pay) }}</td>
+        <td class="px-4 py-3 text-right font-semibold">${{ '%.2f'|format(r.holiday_pay) }}</td>
+        <td class="px-4 py-3 text-xs">
+          {% if r.open_shift_count %}<span class="text-amber-700">{{ r.open_shift_count }} open shift(s) in window — wages under-counted</span>{% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">No wages earned in the four-week window.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

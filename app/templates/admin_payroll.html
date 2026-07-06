@@ -41,7 +41,8 @@
         <th class="px-4 py-3 font-medium text-right">OT hrs</th>
         <th class="px-4 py-3 font-medium text-right">Regular pay</th>
         <th class="px-4 py-3 font-medium text-right">OT pay</th>
-        <th class="px-4 py-3 font-medium text-right">Total pay</th>
+        <th class="px-4 py-3 font-medium text-right">Total wages</th>
+        <th class="px-4 py-3 font-medium text-right">Vacation pay</th>
         <th class="px-4 py-3 font-medium">Flags</th>
       </tr>
     </thead>
@@ -54,13 +55,17 @@
         <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.regular_pay) }}</td>
         <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.overtime_pay) }}</td>
         <td class="px-4 py-3 text-right font-semibold">${{ '%.2f'|format(r.total_pay) }}</td>
+        <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.vacation_pay) }}
+          <span class="text-xs text-slate-400">({{ '%g'|format(r.vacation_pay_percent) }}%)</span></td>
         <td class="px-4 py-3 text-xs">
           {% if r.open_shift_count %}<span class="text-amber-700">{{ r.open_shift_count }} open excluded</span><br>{% endif %}
+          {% if r.auto_clocked_out_count %}<span class="text-amber-700">{{ r.auto_clocked_out_count }} auto-closed — verify times</span><br>{% endif %}
+          {% if r.short_shift_count %}<span class="text-amber-700">{{ r.short_shift_count }} under 3h — 3-hour rule may apply</span><br>{% endif %}
           {% if r.below_min_wage %}<span class="text-red-600">a role is below min wage</span>{% endif %}
         </td>
       </tr>
       {% else %}
-      <tr><td colspan="7" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
+      <tr><td colspan="8" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
       {% endfor %}
     </tbody>
     {% if totals %}
@@ -72,7 +77,11 @@
         <td class="px-4 py-3"></td>
         <td class="px-4 py-3"></td>
         <td class="px-4 py-3 text-right">${{ '%.2f'|format(totals.total_pay) }}</td>
-        <td class="px-4 py-3 text-xs">{% if totals.open_shifts %}{{ totals.open_shifts }} open shift(s) excluded{% endif %}</td>
+        <td class="px-4 py-3 text-right">${{ '%.2f'|format(totals.vacation_pay) }}</td>
+        <td class="px-4 py-3 text-xs">
+          {% if totals.open_shifts %}{{ totals.open_shifts }} open shift(s) excluded<br>{% endif %}
+          {% if totals.auto_closed %}{{ totals.auto_closed }} auto-closed shift(s) — verify times{% endif %}
+        </td>
       </tr>
     </tfoot>
     {% endif %}

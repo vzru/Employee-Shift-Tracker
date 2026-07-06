@@ -40,6 +40,10 @@ class Employee(BaseModel):
     last_name: str                 # stored ONLY in employees.json
     active: bool = True           # inactive employees hide from the kiosk
     roles: list[Role] = Field(default_factory=list)
+    # Vacation pay accrual rate, percent of gross wages. Ontario ESA minimum is
+    # 4% (6% once the employee reaches 5 years of service — bump it manually).
+    # Shown as its own column in the payroll export ("paid as earned" style).
+    vacation_pay_percent: float = 4.0
 
     @property
     def name(self) -> str:

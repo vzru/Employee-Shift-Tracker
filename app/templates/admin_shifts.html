@@ -111,7 +111,12 @@
                 </td>
               </template>
               <template x-if="editingShiftId !== s.id">
-                <td class="px-3 py-2 text-right text-slate-700" x-text="s.duration !== null ? s.duration.toFixed(2) : '—'"></td>
+                <td class="px-3 py-2 text-right text-slate-700 whitespace-nowrap">
+                  <span x-text="s.duration !== null ? s.duration.toFixed(2) : '—'"></span>
+                  <span x-show="!s.voided && s.short"
+                        class="ml-1 inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800"
+                        title="Under 3 hours — Ontario's 3-hour rule may require topping this up to 3 hours' pay">&lt;3h</span>
+                </td>
               </template>
               <template x-if="editingShiftId !== s.id">
                 <td class="px-3 py-2 text-slate-700" x-text="s.break_override !== null ? s.break_override + ' min (override)' : 'auto'"></td>

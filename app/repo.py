@@ -143,6 +143,35 @@ def open_shifts_by_employee() -> dict[str, Shift]:
     return result
 
 
+def find_misaligned_week_folders() -> list[str]:
+    """
+    Week folders on disk whose start date doesn't fall on the configured
+    week-start weekday. This happens when Settings > "Week starts on" is
+    changed after shifts exist: lookups compute keys under the NEW scheme, so
+    files stored under the old scheme silently stop being found by the Shifts
+    page and payroll. Surfaced as a warning banner in the admin panel; the fix
+    is to re-bucket the files (tools/migrate_weeks.py).
+    """
+    wsw = _week_start_weekday()
+    misaligned: list[str] = []
+    root = paths.data_dir()
+    if not root.exists():
+        return misaligned
+    for year_dir in root.iterdir():
+        if not (year_dir.is_dir() and year_dir.name.isdigit()):
+            continue
+        for week_dir in year_dir.iterdir():
+            if not (week_dir.is_dir() and week_dir.name.startswith("week-")):
+                continue
+            try:
+                start = date.fromisoformat(week_dir.name[len("week-"):])
+            except ValueError:
+                continue  # not a week folder we recognize
+            if start.weekday() != wsw:
+                misaligned.append(f"{year_dir.name}/{week_dir.name}")
+    return sorted(misaligned)
+
+
 def auto_close_stale_shifts() -> list[Shift]:
     """
     Safety net: close any shift that's been open longer than

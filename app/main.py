@@ -101,7 +101,10 @@ def run() -> None:
         print("Employee Shift Tracker is already running on this PC.")
         print("Use the browser tab / console window that's already open instead")
         print("of starting a second copy.")
-        input("Press Enter to close this window...")
+        try:
+            input("Press Enter to close this window...")
+        except EOFError:
+            pass  # stdin closed (launched without a console) — just exit
         return
 
     port = _find_free_port()

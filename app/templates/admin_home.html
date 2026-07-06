@@ -3,6 +3,16 @@
 {% block content %}
 <h1 class="text-2xl font-bold text-slate-900">Admin panel</h1>
 
+{% if misaligned_weeks %}
+<div class="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-800">
+  <strong>Data warning:</strong> {{ misaligned_weeks|length }} week folder(s) on disk don't match the
+  current "Week starts on" setting, so their shifts are <strong>invisible</strong> to the Shifts page
+  and payroll: {{ misaligned_weeks | join(', ') }}.
+  Either change the setting back (Admin &gt; Settings) or re-bucket the files with
+  <code class="rounded bg-red-100 px-1">tools/migrate_weeks.py</code>.
+</div>
+{% endif %}
+
 <div class="mt-4 grid gap-4 sm:grid-cols-3">
   <div class="rounded-xl border border-slate-200 bg-white p-5">
     <div class="text-3xl font-bold text-slate-900">{{ employee_count }}</div>
@@ -37,6 +47,10 @@
   <a href="/admin/payroll" class="rounded-xl border border-slate-200 bg-white p-5 hover:border-indigo-300 hover:shadow-sm">
     <div class="font-semibold text-slate-900">Payroll export</div>
     <div class="text-sm text-slate-500">Hours &amp; pay CSV for a date range</div>
+  </a>
+  <a href="/admin/holiday" class="rounded-xl border border-slate-200 bg-white p-5 hover:border-indigo-300 hover:shadow-sm">
+    <div class="font-semibold text-slate-900">Holiday pay</div>
+    <div class="text-sm text-slate-500">ESA public-holiday pay estimate</div>
   </a>
   <a href="/admin/settings" class="rounded-xl border border-slate-200 bg-white p-5 hover:border-indigo-300 hover:shadow-sm">
     <div class="font-semibold text-slate-900">Settings</div>

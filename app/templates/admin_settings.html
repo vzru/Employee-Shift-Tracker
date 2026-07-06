@@ -64,6 +64,7 @@
           {% endfor %}
         </select>
         <span class="mt-1 block text-xs text-slate-400">Also defines the work week used for overtime, how shifts are grouped in the Shifts page, and how they're stored on disk.</span>
+        <span class="mt-1 block text-xs font-medium text-red-600">Warning: changing this after shifts exist hides those shifts from the Shifts page and payroll until the data files are re-bucketed (tools/migrate_weeks.py). The admin home page will warn if this happens.</span>
       </label>
     </div>
   </section>

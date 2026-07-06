@@ -24,10 +24,13 @@ employee has a list of ROLES; one employee can hold several, each with its own
 department and hourly rate (e.g. a cashier in Bowling who's also a bartender
 in Restaurant). "active": false means the employee is HIDDEN from the kiosk
 but kept here for the record (employees are deactivated, never deleted, so
-historical shifts always resolve to a name).
+historical shifts always resolve to a name). "vacation_pay_percent" is that
+employee's vacation pay accrual rate (Ontario ESA minimum 4%; 6% once they
+reach 5 years of service), used by the payroll export.
     [
       {
         "id": "a1b2c3d4e5f6", "first_name": "Jane", "last_name": "Doe", "active": true,
+        "vacation_pay_percent": 4.0,
         "roles": [
           { "id": "r1", "title": "Cashier", "department": "Bowling", "hourly_rate": 17.6 },
           { "id": "r2", "title": "Bartender", "department": "Restaurant", "hourly_rate": 18.5 }
@@ -72,7 +75,9 @@ raw "hours" (clock_out - clock_in, not break-adjusted) once clocked out:
     ]
 A shift with "clock_out": null is still OPEN (the person has not clocked out);
 "hours" stays null until it's closed. Timestamps are local system time in ISO
-8601 (no timezone). Shifts recorded before roles existed have null role_id/
+8601 (no timezone) - daylight saving time is IGNORED, so an overnight shift on
+the March/November changeover night is off by one real hour; correct it in
+Admin > Shifts if it matters. Shifts recorded before roles existed have null role_id/
 role_title/department/hourly_rate. "auto_clocked_out": true means the shift
 was closed by the automatic-clock-out safety net (Admin > Settings), not a
 real clock-out — the recorded clock_out is whenever the app happened to

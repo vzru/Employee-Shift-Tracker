@@ -12,6 +12,7 @@ bcrypt==4.0.1             # bcrypt backend for passlib (4.0.1 avoids the passlib
 itsdangerous==2.2.0       # signed session cookies (Starlette SessionMiddleware)
 pydantic==2.10.5          # data models / validation
 
-# Build-time only (not imported by the app; used to produce the .exe)
+# Build-time / dev only (not imported by the app)
 pyinstaller==6.11.1
 pillow==12.3.0            # tools/generate_icon.py (regenerates the app icon/favicon)
+pytest==9.1.1             # test suite: .venv\Scripts\python.exe -m pytest

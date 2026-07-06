@@ -116,6 +116,9 @@ def admin_home(request: Request, _: bool = Depends(require_admin)):
             "clocked_in_count": len(open_map),
             "below_min_wage": below,
             "min_wage": settings.min_wage.rate,
+            # Week folders stored under a different week-start scheme than the
+            # current setting — invisible to Shifts/payroll until migrated.
+            "misaligned_weeks": repo.find_misaligned_week_folders(),
         },
     )
 
@@ -175,6 +178,7 @@ def employee_add(
     last_name: str = Form(...),
     roles_json: str = Form("[]"),
     active: str | None = Form(None),
+    vacation_pay_percent: float = Form(4.0),
     _: bool = Depends(require_admin),
 ):
     first_name = first_name.strip()
@@ -192,6 +196,7 @@ def employee_add(
         last_name=last_name,
         active=active is not None,
         roles=roles,
+        vacation_pay_percent=max(0.0, vacation_pay_percent),
     )
     employees.append(new_employee)
     repo.save_employees(employees)
@@ -199,6 +204,7 @@ def employee_add(
         "employee_added", "admin",
         employee_id=new_employee.id, first_name=first_name, last_name=last_name,
         active=new_employee.active, roles=[r.model_dump() for r in roles],
+        vacation_pay_percent=new_employee.vacation_pay_percent,
     )
     return redirect("/admin/employees?ok=Employee+added")
 
@@ -211,6 +217,7 @@ def employee_edit(
     last_name: str = Form(...),
     roles_json: str = Form("[]"),
     active: str | None = Form(None),
+    vacation_pay_percent: float = Form(4.0),
     _: bool = Depends(require_admin),
 ):
     roles = _parse_roles(roles_json)
@@ -224,12 +231,15 @@ def employee_edit(
             new_first = first_name.strip() or e.first_name
             new_last = last_name.strip() or e.last_name
             new_active = active is not None
+            new_vacation = max(0.0, vacation_pay_percent)
             if e.first_name != new_first:
                 changes["first_name"] = [e.first_name, new_first]
             if e.last_name != new_last:
                 changes["last_name"] = [e.last_name, new_last]
             if e.active != new_active:
                 changes["active"] = [e.active, new_active]
+            if e.vacation_pay_percent != new_vacation:
+                changes["vacation_pay_percent"] = [e.vacation_pay_percent, new_vacation]
             old_roles = [r.model_dump() for r in e.roles]
             new_roles = [r.model_dump() for r in roles]
             if old_roles != new_roles:
@@ -237,6 +247,7 @@ def employee_edit(
             e.first_name = new_first
             e.last_name = new_last
             e.active = new_active
+            e.vacation_pay_percent = new_vacation
             e.roles = roles
     repo.save_employees(employees)
     if changes:
@@ -311,6 +322,9 @@ def shifts_page(
             "clock_out": s.clock_out,
             "open": s.clock_out is None,
             "duration": duration,
+            # Ontario ESA three-hour rule: closed shifts under 3h may owe a
+            # top-up (badge in the details popup; also flagged in payroll).
+            "short": duration is not None and duration < payroll.SHORT_SHIFT_HOURS,
             "clock_in_input": _to_input(s.clock_in),
             "clock_out_input": _to_input(s.clock_out) if s.clock_out else "",
             "break_override": overrides.get(s.id, {}).get("minutes"),
@@ -382,13 +396,30 @@ def shift_edit(
     break_override: str | None = Form(None),
     _: bool = Depends(require_admin),
 ):
-    ws = date.fromisoformat(week_start)
+    try:
+        ws = date.fromisoformat(week_start)
+    except ValueError:
+        return redirect("/admin/shifts?err=Invalid+week")
 
     # Snapshot the pre-edit state for the audit log.
     before = next(
         (s for s in repo.load_week_shifts(ws) if s.id == shift_id), None
     )
     before_override = repo.load_adjustments(ws).get(shift_id, {}).get("minutes")
+
+    # Break override: empty => clear (auto rule); otherwise fixed minutes.
+    # Parsed BEFORE the shift is updated so a bad value changes nothing at all.
+    ov = break_override.strip() if break_override else ""
+    try:
+        new_override = int(ov) if ov else None
+    except ValueError:
+        return redirect(
+            f"/admin/shifts?week_start={week_start}&err=Break+override+must+be+a+whole+number+of+minutes"
+        )
+    if new_override is not None and new_override < 0:
+        return redirect(
+            f"/admin/shifts?week_start={week_start}&err=Break+override+cannot+be+negative"
+        )
 
     try:
         ci = to_iso(parse_iso(clock_in))
@@ -397,9 +428,6 @@ def shift_edit(
     except ValueError as exc:
         return redirect(f"/admin/shifts?week_start={week_start}&err={str(exc).replace(' ', '+')}")
 
-    # Break override: empty => clear (auto rule); otherwise fixed minutes.
-    ov = break_override.strip() if break_override else ""
-    new_override = int(ov) if ov else None
     repo.set_break_override(ws, shift_id, new_override)
 
     if before is not None:
@@ -432,7 +460,10 @@ def shift_void(
     record) but are excluded from payroll, the summary, and clock-state logic.
     Break overrides are left intact so un-voiding restores the shift exactly.
     """
-    ws = date.fromisoformat(week_start)
+    try:
+        ws = date.fromisoformat(week_start)
+    except ValueError:
+        return redirect("/admin/shifts?err=Invalid+week")
     want_voided = voided == "true"
     before = next(
         (s for s in repo.load_week_shifts(ws) if s.id == shift_id), None
@@ -572,8 +603,43 @@ def _totals(rows):
         "regular_hours": round(sum(r.regular_hours for r in rows), 2),
         "overtime_hours": round(sum(r.overtime_hours for r in rows), 2),
         "total_pay": round(sum(r.total_pay for r in rows), 2),
+        "vacation_pay": round(sum(r.vacation_pay for r in rows), 2),
         "open_shifts": sum(r.open_shift_count for r in rows),
+        "auto_closed": sum(r.auto_clocked_out_count for r in rows),
     }
+
+
+@router.get("/holiday")
+def holiday_page(
+    request: Request,
+    holiday: str | None = None,
+    _: bool = Depends(require_admin),
+):
+    """
+    Ontario ESA public-holiday pay estimate for a chosen holiday date:
+    (regular wages in the 4 work weeks before the week with the holiday,
+    plus vacation pay on those wages) / 20. Eligibility is not checked.
+    """
+    rows = window_start = window_end = None
+    err = None
+    if holiday:
+        try:
+            parsed = date.fromisoformat(holiday)
+            rows, window_start, window_end = payroll.compute_holiday_pay(parsed)
+        except ValueError:
+            err = "Enter a valid holiday date."
+
+    return templates.TemplateResponse(
+        "admin_holiday.html",
+        {
+            "request": request,
+            "holiday": holiday or "",
+            "rows": rows,
+            "window_start": window_start,
+            "window_end": window_end,
+            "err": err,
+        },
+    )
 
 
 @router.get("/payroll/export")
@@ -583,8 +649,13 @@ def payroll_export(
     end: str = "",
     _: bool = Depends(require_admin),
 ):
-    parsed_start = date.fromisoformat(start)
-    parsed_end = date.fromisoformat(end)
+    try:
+        parsed_start = date.fromisoformat(start)
+        parsed_end = date.fromisoformat(end)
+        if parsed_end < parsed_start:
+            raise ValueError
+    except ValueError:
+        return redirect("/admin/payroll?err=Choose+a+valid+date+range+first")
     rows = payroll.compute_payroll(parsed_start, parsed_end)
     csv_text = payroll.to_csv(rows, parsed_start, parsed_end)
     filename = f"payroll_{start}_to_{end}.csv"

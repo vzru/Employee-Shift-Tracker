@@ -9,6 +9,8 @@ current time, which the employee may edit before confirming the clock in/out.
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse
 
@@ -17,6 +19,14 @@ from ..deps import templates
 from ..timeutil import now_local, parse_iso, to_iso, TS_FORMAT_MINUTE
 
 router = APIRouter()
+
+# Server-side sanity bounds for the (editable) kiosk timestamp. The client
+# warns about odd times, but only the server can enforce: a timestamp outside
+# these bounds would file the shift in a week the open-shift scan
+# (repo._OPEN_SCAN_WEEKS) never looks at, allowing a second "open" shift for
+# the same employee and hiding the stray one from auto-clockout and payroll.
+_MAX_FUTURE = timedelta(hours=24)
+_MAX_PAST = timedelta(days=7)
 
 
 @router.get("/")
@@ -100,15 +110,40 @@ def clock(
     # kiosk main page and admin pages; a successful clock in/out redirects to
     # the main page, which sweeps there. Running it before the clock action
     # could close a stale shift mid-request and change the in-vs-out decision.
+
+    # Cross-site POST guard: /clock is unauthenticated (kiosk), so a malicious
+    # website open in a browser on this PC could otherwise POST here silently
+    # (form POSTs don't need CORS). Browsers send Sec-Fetch-Site on every
+    # request; anything cross-site is rejected. Requests without the header
+    # (curl, old browsers) are allowed — this guards drive-by browser abuse,
+    # not local tools.
+    sec_fetch_site = request.headers.get("sec-fetch-site", "")
+    if sec_fetch_site and sec_fetch_site not in ("same-origin", "none"):
+        return RedirectResponse("/?err=Blocked+cross-site+request", status_code=303)
+
     employee = repo.get_employee(employee_id)
     if employee is None:
         return RedirectResponse("/?err=Unknown+employee", status_code=303)
 
     # Normalize the (possibly edited) timestamp to stored second precision.
     try:
-        stamp = to_iso(parse_iso(timestamp))
+        when = parse_iso(timestamp)
+        stamp = to_iso(when)
     except (ValueError, TypeError):
         return RedirectResponse("/?err=Invalid+time", status_code=303)
+
+    # Enforce the sanity bounds (see _MAX_FUTURE/_MAX_PAST above).
+    now = now_local()
+    if when > now + _MAX_FUTURE:
+        return RedirectResponse(
+            "/?err=That+time+is+more+than+24+hours+in+the+future+—+check+the+date",
+            status_code=303,
+        )
+    if when < now - _MAX_PAST:
+        return RedirectResponse(
+            "/?err=That+time+is+more+than+7+days+in+the+past+—+check+the+date",
+            status_code=303,
+        )
 
     try:
         if repo.find_open_shift(employee_id) is not None:

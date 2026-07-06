@@ -26,7 +26,13 @@
       <input type="text" name="last_name" required
              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
     </label>
-    <label class="flex items-center gap-2 pb-2 sm:col-span-2">
+    <label class="block">
+      <span class="text-sm font-medium text-slate-700">Vacation pay %</span>
+      <input type="number" name="vacation_pay_percent" value="4" min="0" step="0.5"
+             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
+      <span class="mt-1 block text-xs text-slate-400">ESA min 4% (6% after 5 years of service).</span>
+    </label>
+    <label class="flex items-center gap-2 pb-2">
       <input type="checkbox" name="active" checked class="rounded border-slate-300 text-indigo-600">
       <span class="text-sm text-slate-700">Active</span>
     </label>
@@ -134,7 +140,12 @@
               <input type="text" name="last_name" value="{{ e.last_name }}" required
                      class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             </label>
-            <label class="flex items-center gap-2 pb-2 sm:col-span-2">
+            <label class="block">
+              <span class="text-xs font-medium text-slate-500">Vacation pay %</span>
+              <input type="number" name="vacation_pay_percent" value="{{ '%g'|format(e.vacation_pay_percent) }}" min="0" step="0.5"
+                     class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+            </label>
+            <label class="flex items-center gap-2 pb-2">
               <input type="checkbox" name="active" {% if e.active %}checked{% endif %} class="rounded border-slate-300 text-indigo-600">
               <span class="text-sm text-slate-700">Active</span>
             </label>

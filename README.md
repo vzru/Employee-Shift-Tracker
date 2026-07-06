@@ -40,12 +40,21 @@ payroll export.
   corrected.
 - **Ontario payroll settings (all editable):** unpaid break deduction, weekly
   overtime (>44h at 1.5×), and a minimum-wage reference with warnings.
+- **Vacation pay accrual:** per-employee percent (ESA minimum 4%, 6% after
+  5 years — set per employee), shown as its own column in payroll.
+- **Public holiday pay calculator:** the ESA formula (regular wages in the 4
+  work weeks before the week with the holiday, + vacation pay, ÷ 20) for any
+  chosen holiday date. Eligibility is left to the operator.
+- **Compliance flags in payroll:** auto-closed shifts ("verify times"), shifts
+  under 3 hours (ESA three-hour rule may apply), open shifts excluded, and
+  below-minimum-wage roles — flagged in both the preview and the CSV.
 - **CSV payroll export** for any date range.
 - **Local-only admin password reset** — no network backdoor.
-- **Automatic daily backup:** while the app is running, a dated copy of the
-  entire `/data` folder is kept in the Windows temp folder
-  (`%TEMP%\EmployeeShiftTrackerBackups\backup-YYYY-MM-DD`), one per calendar
-  day, in addition to any manual backups of `/data` itself.
+- **Automatic daily backups:** while the app is running, a dated copy of the
+  entire `/data` folder is written once per calendar day to BOTH
+  `%TEMP%\EmployeeShiftTrackerBackups\` and
+  `%LOCALAPPDATA%\EmployeeShiftTracker\backups\` (the latter survives Windows
+  temp cleanup). The newest 14 snapshots are kept per location.
 
 ---
 
@@ -145,3 +154,11 @@ Alpine.js (vendored, offline) · bcrypt via passlib · packaged with PyInstaller
   unpaid break is only lawful if the employee actually took it and was free of
   duties.
 - **Open shifts** (no clock-out) are flagged and **excluded** from totals.
+- **Vacation pay** accrues at each employee's configured percent of gross
+  wages (regular + overtime) and is reported separately from wages — it is
+  not added into "Total wages".
+- **Daylight saving time is ignored.** Timestamps are naive local time, so on
+  the November fall-back night an overnight shift under-counts one real
+  worked hour (and over-counts one on the March spring-forward night). At
+  most one hour once a year for whoever works those overnights — correct it
+  manually on the Shifts page if it matters.
