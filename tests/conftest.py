@@ -1,6 +1,7 @@
 """
-Shared fixtures: every test gets an isolated temp /data folder so tests never
-touch real data and never see each other's files.
+Shared fixtures. Every test gets an isolated temp /data folder (via monkeypatch
+of paths.app_base_dir) so tests never touch real data and never see each
+other's files. Route tests build a fresh FastAPI app against that same folder.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from app import paths, timeutil
+from app import paths, security, timeutil
 
 
 @pytest.fixture
@@ -21,6 +22,8 @@ def data_dir(tmp_path: Path, monkeypatch) -> Path:
     d.mkdir()
     return d
 
+
+# --- Data builders -----------------------------------------------------------
 
 @pytest.fixture
 def make_employee(data_dir: Path):
@@ -70,24 +73,62 @@ def make_shift(data_dir: Path):
     return _make
 
 
+def _settings_dict(break_enabled=False, break_minutes=30, break_trigger=5.0,
+                   ot_enabled=False, ot_threshold=44.0, ot_multiplier=1.5,
+                   week_start_weekday=6, min_wage=17.60,
+                   auto_enabled=False, auto_threshold=24.0):
+    return {
+        "break_rules": {"enabled": break_enabled, "duration_minutes": break_minutes,
+                        "trigger_hours": break_trigger},
+        "overtime": {"enabled": ot_enabled, "multiplier": ot_multiplier,
+                     "weekly_threshold": ot_threshold,
+                     "week_start_weekday": week_start_weekday},
+        "min_wage": {"rate": min_wage},
+        "auto_clockout": {"enabled": auto_enabled, "threshold_hours": auto_threshold},
+        "role_catalog": {"Restaurant": ["Cook"]},
+    }
+
+
 @pytest.fixture
 def settings_writer(data_dir: Path):
-    """Write admin.json with specific settings (defaults: everything off)."""
-    def _write(break_enabled=False, break_minutes=30, break_trigger=5.0,
-               ot_enabled=False, ot_threshold=44.0, ot_multiplier=1.5,
-               week_start_weekday=6, min_wage=17.60):
+    """Write admin.json with specific settings (password unset by default)."""
+    def _write(password_hash=None, **kw):
         (data_dir / "admin.json").write_text(json.dumps({
-            "password_hash": None,
-            "settings": {
-                "break_rules": {"enabled": break_enabled,
-                                "duration_minutes": break_minutes,
-                                "trigger_hours": break_trigger},
-                "overtime": {"enabled": ot_enabled, "multiplier": ot_multiplier,
-                             "weekly_threshold": ot_threshold,
-                             "week_start_weekday": week_start_weekday},
-                "min_wage": {"rate": min_wage},
-                "auto_clockout": {"enabled": False, "threshold_hours": 24.0},
-                "role_catalog": {"Restaurant": ["Cook"]},
-            },
+            "password_hash": password_hash,
+            "settings": _settings_dict(**kw),
         }))
     return _write
+
+
+# --- App / client fixtures ---------------------------------------------------
+
+@pytest.fixture
+def client(data_dir):
+    """A TestClient over a fresh app bound to the isolated data dir.
+
+    follow_redirects is off so tests can assert on 303 targets; server
+    exceptions propagate so any accidental 500 fails the test loudly.
+    """
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    return TestClient(create_app(), follow_redirects=False)
+
+
+ADMIN_PASSWORD = "test-password-123"
+
+
+@pytest.fixture
+def admin_client(data_dir, client):
+    """A TestClient already logged in as admin.
+
+    Writes admin.json (hash + default settings) then logs in so the session
+    cookie is set. Tests can still overwrite settings afterwards via
+    repo.save_settings without disturbing the login (it preserves the hash).
+    """
+    (data_dir / "admin.json").write_text(json.dumps({
+        "password_hash": security.hash_password(ADMIN_PASSWORD),
+        "settings": _settings_dict(),
+    }))
+    resp = client.post("/admin/login", data={"password": ADMIN_PASSWORD})
+    assert resp.status_code == 303
+    return client
