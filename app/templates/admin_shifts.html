@@ -125,7 +125,7 @@
                 <td class="px-3 py-2 text-right whitespace-nowrap">
                   <template x-if="!s.voided">
                     <span>
-                      <button type="button" @click="editingShiftId = s.id" class="text-indigo-600 hover:underline">Edit</button>
+                      <button type="button" @click="startEdit(s)" class="text-indigo-600 hover:underline">Edit</button>
                       <form method="post" action="/admin/shifts/void" class="inline"
                             onsubmit="return confirm('Void this shift? It is kept for the record but excluded from payroll. You can restore it later.');">
                         <input type="hidden" name="week_start" value="{{ week_start.isoformat() }}">
@@ -149,24 +149,58 @@
               <!-- Edit form spanning the row -->
               <template x-if="editingShiftId === s.id">
                 <td colspan="6" class="px-3 py-3" x-cloak>
-                  <form method="post" action="/admin/shifts/edit" class="grid gap-3 sm:grid-cols-4 sm:items-end">
+                  <form method="post" action="/admin/shifts/edit" class="flex flex-wrap items-end gap-4">
                     <input type="hidden" name="week_start" value="{{ week_start.isoformat() }}">
                     <input type="hidden" name="shift_id" :value="s.id">
-                    <label class="block">
+
+                    <!-- Clock in: date + time in 5-minute steps -->
+                    <div>
                       <span class="text-xs font-medium text-slate-500">Clock in</span>
-                      <input type="datetime-local" name="clock_in" :value="s.clock_in_input" step="60" required
-                             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
-                    </label>
-                    <label class="block">
-                      <span class="text-xs font-medium text-slate-500">Clock out <span class="text-slate-400">(blank = still open)</span></span>
-                      <input type="datetime-local" name="clock_out" :value="s.clock_out_input" step="60"
-                             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
-                    </label>
+                      <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                        <input type="date" x-model="editCi.date" required
+                               class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                        <select x-model.number="editCi.hour" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+                          <template x-for="h in 12" :key="h"><option :value="h" x-text="h"></option></template>
+                        </select>
+                        <span class="text-slate-400">:</span>
+                        <select x-model.number="editCi.minute" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+                          <template x-for="m in 12" :key="(m - 1) * 5"><option :value="(m - 1) * 5" x-text="String((m - 1) * 5).padStart(2, '0')"></option></template>
+                        </select>
+                        <select x-model="editCi.ampm" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+                          <option value="AM">AM</option><option value="PM">PM</option>
+                        </select>
+                      </div>
+                      <input type="hidden" name="clock_in" :value="clockInValue">
+                    </div>
+
+                    <!-- Clock out: date + time in 5-minute steps, or "still open" -->
+                    <div>
+                      <span class="text-xs font-medium text-slate-500">Clock out</span>
+                      <label class="ml-2 inline-flex items-center gap-1 text-xs text-slate-500">
+                        <input type="checkbox" x-model="editCo.open" class="rounded border-slate-300 text-indigo-600"> still open
+                      </label>
+                      <div class="mt-1 flex flex-wrap items-center gap-1.5" :class="editCo.open ? 'opacity-40' : ''">
+                        <input type="date" x-model="editCo.date" :disabled="editCo.open"
+                               class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+                        <select x-model.number="editCo.hour" :disabled="editCo.open" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+                          <template x-for="h in 12" :key="h"><option :value="h" x-text="h"></option></template>
+                        </select>
+                        <span class="text-slate-400">:</span>
+                        <select x-model.number="editCo.minute" :disabled="editCo.open" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+                          <template x-for="m in 12" :key="(m - 1) * 5"><option :value="(m - 1) * 5" x-text="String((m - 1) * 5).padStart(2, '0')"></option></template>
+                        </select>
+                        <select x-model="editCo.ampm" :disabled="editCo.open" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+                          <option value="AM">AM</option><option value="PM">PM</option>
+                        </select>
+                      </div>
+                      <input type="hidden" name="clock_out" :value="clockOutValue">
+                    </div>
+
                     <label class="block">
                       <span class="text-xs font-medium text-slate-500">Break override (min)</span>
                       <input type="number" name="break_override" min="0" :value="s.break_override !== null ? s.break_override : ''"
                              placeholder="auto"
-                             class="mt-1 w-full rounded-lg border border-slate-300 px-2 py-1.5">
+                             class="mt-1 w-28 rounded-lg border border-slate-300 px-2 py-1.5">
                     </label>
                     <div class="flex gap-2">
                       <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Save</button>
@@ -201,6 +235,12 @@
       detailsOpen: false,
       selectedId: null,
       editingShiftId: null,
+      // Edit-form time state (date + 12h clock + 5-min minute + AM/PM), so the
+      // pickers only ever offer 5-minute increments (native datetime-local
+      // ignores `step` for its minute list in some browsers).
+      editCi: { date: '', hour: 12, minute: 0, ampm: 'AM' },
+      editCo: { date: '', hour: 12, minute: 0, ampm: 'AM', open: false },
+
       get selectedShifts() {
         return this.shifts.filter(s => s.employee_id === this.selectedId);
       },
@@ -213,6 +253,33 @@
         this.editingShiftId = null;
         this.detailsOpen = true;
       },
+
+      // Parse a stored "YYYY-MM-DDTHH:MM" into the editable parts, rounding the
+      // minute to the nearest 5 so it lands on one of the offered options.
+      parseInput(v) {
+        const [d, t] = v.split('T');
+        let [hh, mm] = t.split(':').map(Number);
+        mm = Math.round(mm / 5) * 5;
+        if (mm === 60) { mm = 0; hh = (hh + 1) % 24; }
+        return { date: d, hour: (hh % 12 === 0 ? 12 : hh % 12), minute: mm, ampm: hh >= 12 ? 'PM' : 'AM' };
+      },
+      // Recombine editable parts back into "YYYY-MM-DDTHH:MM" (24h) for submit.
+      combine(x) {
+        let h = x.hour % 12;
+        if (x.ampm === 'PM') h += 12;
+        return `${x.date}T${String(h).padStart(2, '0')}:${String(x.minute).padStart(2, '0')}`;
+      },
+      startEdit(s) {
+        this.editingShiftId = s.id;
+        this.editCi = this.parseInput(s.clock_in_input);
+        if (s.clock_out_input) {
+          this.editCo = { ...this.parseInput(s.clock_out_input), open: false };
+        } else {
+          this.editCo = { ...this.parseInput(s.clock_in_input), open: true };
+        }
+      },
+      get clockInValue() { return this.combine(this.editCi); },
+      get clockOutValue() { return this.editCo.open ? '' : this.combine(this.editCo); },
     };
   }
 </script>

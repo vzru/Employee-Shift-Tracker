@@ -53,35 +53,51 @@ class TestDepsHelpers:
         assert require_admin(Req()) is True
 
 
+def _grab_port() -> tuple[socket.socket, int]:
+    """Bind an OS-assigned port and keep it open (so it stays occupied).
+    Returns the listening socket and its port; caller closes it."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+    if exclusive is not None:
+        s.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+    s.bind((main.HOST, 0))
+    s.listen(1)
+    return s, s.getsockname()[1]
+
+
 class TestMain:
+    # These monkeypatch PREFERRED_PORTS to dynamically-found ports so they don't
+    # depend on 8765 being free (e.g. when the app is running during testing).
+
     def test_find_free_port_returns_bindable(self):
         port = main._find_free_port()
-        # We can actually bind it (it's free right now).
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            s.bind((main.HOST, port))
+            s.bind((main.HOST, port))  # actually free right now
 
-    def test_find_free_port_prefers_first_when_all_free(self):
-        # With nothing bound, it returns the first preferred port.
-        assert main._find_free_port() == main.PREFERRED_PORTS[0]
-
-    def test_find_free_port_skips_busy_preferred(self):
-        # Occupy the first preferred port with a real listener; the probe must
-        # now correctly detect it as busy and pick a different port.
-        busy = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
-        if exclusive is not None:
-            busy.setsockopt(socket.SOL_SOCKET, exclusive, 1)
-        busy.bind((main.HOST, main.PREFERRED_PORTS[0]))
-        busy.listen(1)
+    def test_find_free_port_prefers_first_free(self, monkeypatch):
+        busy_sock, busy = _grab_port()
         try:
-            assert not main._port_is_free(main.PREFERRED_PORTS[0])
-            assert main._find_free_port() != main.PREFERRED_PORTS[0]
+            monkeypatch.setattr(main, "PREFERRED_PORTS", [busy])
+            # Only preferred port is busy -> falls back to an ephemeral port.
+            assert main._find_free_port() != busy
         finally:
-            busy.close()
+            busy_sock.close()
+
+    def test_find_free_port_skips_busy_preferred(self, monkeypatch):
+        busy_sock, busy = _grab_port()
+        free_sock, free = _grab_port()
+        free_sock.close()  # release `free` so it's pickable; keep `busy` held
+        try:
+            monkeypatch.setattr(main, "PREFERRED_PORTS", [busy, free])
+            assert main._port_is_free(busy) is False
+            assert main._find_free_port() == free
+        finally:
+            busy_sock.close()
 
     def test_port_is_free_true_for_unused(self):
-        assert main._port_is_free(main.PREFERRED_PORTS[0]) is True
+        sock, port = _grab_port()
+        sock.close()  # now free
+        assert main._port_is_free(port) is True
 
     def test_create_app_builds(self, data_dir):
         app = main.create_app()

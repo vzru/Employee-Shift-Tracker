@@ -15,7 +15,7 @@
     <a href="/admin/settings" class="underline">Admin &gt; Settings</a> first.
   </p>
   {% endif %}
-  <form method="post" action="/admin/employees/add" class="mt-3 grid gap-3 sm:grid-cols-5 sm:items-end">
+  <form method="post" action="/admin/employees/add" class="mt-3 grid gap-3 sm:grid-cols-5 sm:items-start">
     <label class="block">
       <span class="text-sm font-medium text-slate-700">First name</span>
       <input type="text" name="first_name" required
@@ -32,10 +32,15 @@
              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
       <span class="mt-1 block text-xs text-slate-400">ESA min 4% (6% after 5 years of service).</span>
     </label>
-    <label class="flex items-center gap-2 pb-2">
-      <input type="checkbox" name="active" checked class="rounded border-slate-300 text-indigo-600">
-      <span class="text-sm text-slate-700">Active</span>
-    </label>
+    <div class="block">
+      {# Invisible label spacer so the checkbox row lines up with the inputs
+         (the row is top-aligned; other fields have a label above their input). #}
+      <span class="block text-sm font-medium invisible" aria-hidden="true">Active</span>
+      <label class="mt-1 flex h-[42px] items-center gap-2">
+        <input type="checkbox" name="active" checked class="rounded border-slate-300 text-indigo-600">
+        <span class="text-sm text-slate-700">Active</span>
+      </label>
+    </div>
 
     <div class="sm:col-span-5">
       <span class="text-sm font-medium text-slate-700">Roles</span>

@@ -32,116 +32,219 @@
 {% endif %}
 
 {% if rows is not none %}
-<div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-  <table class="min-w-full divide-y divide-slate-200 text-sm">
-    <thead class="bg-slate-50 text-left text-slate-500">
-      <tr>
-        <th class="px-4 py-3 font-medium">Employee</th>
-        <th class="px-4 py-3 font-medium text-right">Regular hrs</th>
-        <th class="px-4 py-3 font-medium text-right">OT hrs</th>
-        <th class="px-4 py-3 font-medium text-right">Regular pay</th>
-        <th class="px-4 py-3 font-medium text-right">OT pay</th>
-        <th class="px-4 py-3 font-medium text-right">Total wages</th>
-        <th class="px-4 py-3 font-medium text-right">Vacation pay</th>
-        <th class="px-4 py-3 font-medium">Flags</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-slate-100">
-      {% for r in rows %}
-      <tr>
-        <td class="px-4 py-3 font-medium text-slate-900">{{ r.name }}</td>
-        <td class="px-4 py-3 text-right">{{ '%.2f'|format(r.regular_hours) }}</td>
-        <td class="px-4 py-3 text-right">{{ '%.2f'|format(r.overtime_hours) }}</td>
-        <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.regular_pay) }}</td>
-        <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.overtime_pay) }}</td>
-        <td class="px-4 py-3 text-right font-semibold">${{ '%.2f'|format(r.total_pay) }}</td>
-        <td class="px-4 py-3 text-right">${{ '%.2f'|format(r.vacation_pay) }}
-          <span class="text-xs text-slate-400">({{ '%g'|format(r.vacation_pay_percent) }}%)</span></td>
-        <td class="px-4 py-3 text-xs">
-          {% if r.open_shift_count %}<span class="text-amber-700">{{ r.open_shift_count }} open excluded</span><br>{% endif %}
-          {% if r.auto_clocked_out_count %}<span class="text-amber-700">{{ r.auto_clocked_out_count }} auto-closed — verify times</span><br>{% endif %}
-          {% if r.short_shift_count %}<span class="text-amber-700">{{ r.short_shift_count }} under 3h — 3-hour rule may apply</span><br>{% endif %}
-          {% if r.below_min_wage %}<span class="text-red-600">a role is below min wage</span>{% endif %}
-        </td>
-      </tr>
-      {% else %}
-      <tr><td colspan="8" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
-      {% endfor %}
-    </tbody>
-    {% if totals %}
-    <tfoot class="bg-slate-50 font-semibold text-slate-800">
-      <tr>
-        <td class="px-4 py-3">Totals</td>
-        <td class="px-4 py-3 text-right">{{ '%.2f'|format(totals.regular_hours) }}</td>
-        <td class="px-4 py-3 text-right">{{ '%.2f'|format(totals.overtime_hours) }}</td>
-        <td class="px-4 py-3"></td>
-        <td class="px-4 py-3"></td>
-        <td class="px-4 py-3 text-right">${{ '%.2f'|format(totals.total_pay) }}</td>
-        <td class="px-4 py-3 text-right">${{ '%.2f'|format(totals.vacation_pay) }}</td>
-        <td class="px-4 py-3 text-xs">
-          {% if totals.open_shifts %}{{ totals.open_shifts }} open shift(s) excluded<br>{% endif %}
-          {% if totals.auto_closed %}{{ totals.auto_closed }} auto-closed shift(s) — verify times{% endif %}
-        </td>
-      </tr>
-    </tfoot>
-    {% endif %}
-  </table>
-</div>
+<div class="mt-6" x-data='payrollTables({{ payroll_data | tojson }})'>
+  <p class="mb-1 text-xs text-slate-400">Click any column heading to sort. In the Flags column, "View" lists the specific shifts.</p>
 
-<div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-  <h2 class="px-4 pt-4 text-lg font-semibold text-slate-900">Weekly hours by employee</h2>
-  <table class="min-w-full divide-y divide-slate-200 text-sm">
-    <thead class="bg-slate-50 text-left text-slate-500">
-      <tr>
-        <th class="px-4 py-3 font-medium">Employee</th>
-        <th class="px-4 py-3 font-medium">Week starting</th>
-        <th class="px-4 py-3 font-medium text-right">Hours</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-slate-100">
-      {% for r in rows %}
-        {% for wh in r.weekly_hours %}
+  <!-- Main payroll table -->
+  <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-50 text-left text-slate-500">
         <tr>
-          <td class="px-4 py-3 font-medium text-slate-900">{{ r.name }}</td>
-          <td class="px-4 py-3">{{ wh.week_start }}</td>
-          <td class="px-4 py-3 text-right">{{ '%.2f'|format(wh.hours) }}</td>
+          <th @click="sortBy('main','name',true)" class="cursor-pointer select-none px-4 py-3 font-medium hover:text-slate-700">Employee<span x-text="ind('main','name')"></span></th>
+          <th @click="sortBy('main','regular_hours')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">Regular hrs<span x-text="ind('main','regular_hours')"></span></th>
+          <th @click="sortBy('main','overtime_hours')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">OT hrs<span x-text="ind('main','overtime_hours')"></span></th>
+          <th @click="sortBy('main','regular_pay')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">Regular pay<span x-text="ind('main','regular_pay')"></span></th>
+          <th @click="sortBy('main','overtime_pay')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">OT pay<span x-text="ind('main','overtime_pay')"></span></th>
+          <th @click="sortBy('main','total_pay')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">Total wages<span x-text="ind('main','total_pay')"></span></th>
+          <th @click="sortBy('main','vacation_pay')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">Vacation pay<span x-text="ind('main','vacation_pay')"></span></th>
+          <th @click="sortBy('main','flag_count')" class="cursor-pointer select-none px-4 py-3 font-medium hover:text-slate-700">Flags<span x-text="ind('main','flag_count')"></span></th>
         </tr>
-        {% endfor %}
-      {% else %}
-      <tr><td colspan="3" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        <template x-for="r in sorted('main')" :key="r.employee_id">
+          <tr>
+            <td class="px-4 py-3 font-medium text-slate-900" x-text="r.name"></td>
+            <td class="px-4 py-3 text-right" x-text="fmt(r.regular_hours)"></td>
+            <td class="px-4 py-3 text-right" x-text="fmt(r.overtime_hours)"></td>
+            <td class="px-4 py-3 text-right" x-text="'$' + fmt(r.regular_pay)"></td>
+            <td class="px-4 py-3 text-right" x-text="'$' + fmt(r.overtime_pay)"></td>
+            <td class="px-4 py-3 text-right font-semibold" x-text="'$' + fmt(r.total_pay)"></td>
+            <td class="px-4 py-3 text-right">
+              <span x-text="'$' + fmt(r.vacation_pay)"></span>
+              <span class="text-xs text-slate-400" x-text="'(' + r.vacation_pay_percent + '%)'"></span>
+            </td>
+            <td class="px-4 py-3 text-xs">
+              <span x-show="r.open_shift_count" class="block text-amber-700" x-text="r.open_shift_count + ' open excluded'"></span>
+              <span x-show="r.auto_clocked_out_count" class="block text-amber-700" x-text="r.auto_clocked_out_count + ' auto-closed — verify times'"></span>
+              <span x-show="r.short_shift_count" class="block text-amber-700" x-text="r.short_shift_count + ' under 3h — 3-hour rule may apply'"></span>
+              <span x-show="r.below_min_wage" class="block text-red-600">a role is below min wage</span>
+              <button type="button" x-show="r.flagged_shifts.length" @click="showDetails(r)"
+                      class="mt-1 font-medium text-indigo-600 hover:underline">
+                View <span x-text="r.flagged_shifts.length"></span> shift(s)
+              </button>
+            </td>
+          </tr>
+        </template>
+        <tr x-show="sorted('main').length === 0"><td colspan="8" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
+      </tbody>
+      {% if totals %}
+      <tfoot class="bg-slate-50 font-semibold text-slate-800">
+        <tr>
+          <td class="px-4 py-3">Totals</td>
+          <td class="px-4 py-3 text-right">{{ '%.2f'|format(totals.regular_hours) }}</td>
+          <td class="px-4 py-3 text-right">{{ '%.2f'|format(totals.overtime_hours) }}</td>
+          <td class="px-4 py-3"></td>
+          <td class="px-4 py-3"></td>
+          <td class="px-4 py-3 text-right">${{ '%.2f'|format(totals.total_pay) }}</td>
+          <td class="px-4 py-3 text-right">${{ '%.2f'|format(totals.vacation_pay) }}</td>
+          <td class="px-4 py-3 text-xs">
+            {% if totals.open_shifts %}{{ totals.open_shifts }} open shift(s) excluded<br>{% endif %}
+            {% if totals.auto_closed %}{{ totals.auto_closed }} auto-closed shift(s) — verify times{% endif %}
+          </td>
+        </tr>
+      </tfoot>
+      {% endif %}
+    </table>
+  </div>
 
-<div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
-  <h2 class="px-4 pt-4 text-lg font-semibold text-slate-900">Pay by role</h2>
-  <table class="min-w-full divide-y divide-slate-200 text-sm">
-    <thead class="bg-slate-50 text-left text-slate-500">
-      <tr>
-        <th class="px-4 py-3 font-medium">Employee</th>
-        <th class="px-4 py-3 font-medium">Department</th>
-        <th class="px-4 py-3 font-medium">Role</th>
-        <th class="px-4 py-3 font-medium text-right">Hours</th>
-        <th class="px-4 py-3 font-medium text-right">Pay</th>
-      </tr>
-    </thead>
-    <tbody class="divide-y divide-slate-100">
-      {% for r in rows %}
-        {% for rp in r.role_pay %}
+  <!-- Weekly hours by employee -->
+  <div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <h2 class="px-4 pt-4 text-lg font-semibold text-slate-900">Weekly hours by employee</h2>
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-50 text-left text-slate-500">
         <tr>
-          <td class="px-4 py-3 font-medium text-slate-900">{{ r.name }}</td>
-          <td class="px-4 py-3">{{ rp.department }}</td>
-          <td class="px-4 py-3">{{ rp.role_title }}</td>
-          <td class="px-4 py-3 text-right">{{ '%.2f'|format(rp.hours) }}</td>
-          <td class="px-4 py-3 text-right">${{ '%.2f'|format(rp.pay) }}</td>
+          <th @click="sortBy('weekly','name',true)" class="cursor-pointer select-none px-4 py-3 font-medium hover:text-slate-700">Employee<span x-text="ind('weekly','name')"></span></th>
+          <th @click="sortBy('weekly','week_start',true)" class="cursor-pointer select-none px-4 py-3 font-medium hover:text-slate-700">Week starting<span x-text="ind('weekly','week_start')"></span></th>
+          <th @click="sortBy('weekly','hours')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">Hours<span x-text="ind('weekly','hours')"></span></th>
         </tr>
-        {% endfor %}
-      {% else %}
-      <tr><td colspan="5" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
-      {% endfor %}
-    </tbody>
-  </table>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        <template x-for="(w, i) in sorted('weekly')" :key="i">
+          <tr>
+            <td class="px-4 py-3 font-medium text-slate-900" x-text="w.name"></td>
+            <td class="px-4 py-3" x-text="w.week_start"></td>
+            <td class="px-4 py-3 text-right" x-text="fmt(w.hours)"></td>
+          </tr>
+        </template>
+        <tr x-show="sorted('weekly').length === 0"><td colspan="3" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pay by role -->
+  <div class="mt-6 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+    <h2 class="px-4 pt-4 text-lg font-semibold text-slate-900">Pay by role</h2>
+    <table class="min-w-full divide-y divide-slate-200 text-sm">
+      <thead class="bg-slate-50 text-left text-slate-500">
+        <tr>
+          <th @click="sortBy('role','name',true)" class="cursor-pointer select-none px-4 py-3 font-medium hover:text-slate-700">Employee<span x-text="ind('role','name')"></span></th>
+          <th @click="sortBy('role','department',true)" class="cursor-pointer select-none px-4 py-3 font-medium hover:text-slate-700">Department<span x-text="ind('role','department')"></span></th>
+          <th @click="sortBy('role','role_title',true)" class="cursor-pointer select-none px-4 py-3 font-medium hover:text-slate-700">Role<span x-text="ind('role','role_title')"></span></th>
+          <th @click="sortBy('role','hours')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">Hours<span x-text="ind('role','hours')"></span></th>
+          <th @click="sortBy('role','pay')" class="cursor-pointer select-none px-4 py-3 text-right font-medium hover:text-slate-700">Pay<span x-text="ind('role','pay')"></span></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-slate-100">
+        <template x-for="(rp, i) in sorted('role')" :key="i">
+          <tr>
+            <td class="px-4 py-3 font-medium text-slate-900" x-text="rp.name"></td>
+            <td class="px-4 py-3" x-text="rp.department"></td>
+            <td class="px-4 py-3" x-text="rp.role_title"></td>
+            <td class="px-4 py-3 text-right" x-text="fmt(rp.hours)"></td>
+            <td class="px-4 py-3 text-right" x-text="'$' + fmt(rp.pay)"></td>
+          </tr>
+        </template>
+        <tr x-show="sorted('role').length === 0"><td colspan="5" class="px-4 py-6 text-center text-slate-400">No shifts in this range.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Flagged-shift detail popup -->
+  <div x-show="detailOpen" x-cloak
+       class="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/50 p-4"
+       @keydown.escape.window="detailOpen = false">
+    <div class="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl" @click.outside="detailOpen = false">
+      <div class="flex items-center justify-between">
+        <h2 class="text-lg font-semibold text-slate-900" x-text="detailName + ' — flagged shifts'"></h2>
+        <button type="button" @click="detailOpen = false" class="text-slate-400 hover:text-slate-600">&times;</button>
+      </div>
+      <div class="mt-4 max-h-[60vh] overflow-y-auto">
+        <table class="min-w-full divide-y divide-slate-200 text-sm">
+          <thead class="bg-slate-50 text-left text-slate-500">
+            <tr>
+              <th class="px-3 py-2 font-medium">Issue</th>
+              <th class="px-3 py-2 font-medium">Role</th>
+              <th class="px-3 py-2 font-medium">Clock in</th>
+              <th class="px-3 py-2 font-medium">Clock out</th>
+              <th class="px-3 py-2 font-medium text-right">Hours</th>
+              <th class="px-3 py-2 font-medium"></th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <template x-for="(fs, i) in detailShifts" :key="i">
+              <tr>
+                <td class="px-3 py-2">
+                  <template x-for="reason in fs.reasons" :key="reason">
+                    <span class="mr-1 inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" x-text="reason"></span>
+                  </template>
+                </td>
+                <td class="px-3 py-2 text-slate-700">
+                  <span x-text="fs.role_title"></span><span class="text-slate-400" x-text="' — ' + fs.department"></span>
+                </td>
+                <td class="px-3 py-2 text-slate-700" x-text="fs.clock_in.replace('T', ' ')"></td>
+                <td class="px-3 py-2 text-slate-700" x-text="fs.clock_out ? fs.clock_out.replace('T', ' ') : '—'"></td>
+                <td class="px-3 py-2 text-right text-slate-700" x-text="fs.hours !== null ? fs.hours.toFixed(2) : '—'"></td>
+                <td class="px-3 py-2 text-right whitespace-nowrap">
+                  <a :href="'/admin/shifts?week_start=' + fs.week_start" class="text-indigo-600 hover:underline">Open week</a>
+                </td>
+              </tr>
+            </template>
+          </tbody>
+        </table>
+      </div>
+      <div class="mt-4 flex justify-end">
+        <button type="button" @click="detailOpen = false" class="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Close</button>
+      </div>
+    </div>
+  </div>
 </div>
 {% endif %}
+
+<script>
+  function payrollTables(data) {
+    return {
+      tables: data,        // { main: [...], weekly: [...], role: [...] }
+      sort: {
+        main: { key: 'name', dir: 1 },     // 1 = ascending, -1 = descending
+        weekly: { key: 'name', dir: 1 },
+        role: { key: 'name', dir: 1 },
+      },
+      detailOpen: false,
+      detailName: '',
+      detailShifts: [],
+
+      sortBy(tbl, key, isText = false) {
+        const s = this.sort[tbl];
+        if (s.key === key) {
+          s.dir *= -1;                       // same column: flip direction
+        } else {
+          s.key = key;
+          s.dir = isText ? 1 : -1;           // text A→Z, numbers high→low first
+        }
+      },
+
+      sorted(tbl) {
+        const s = this.sort[tbl];
+        return [...this.tables[tbl]].sort((a, b) => {
+          const av = a[s.key], bv = b[s.key];
+          if (typeof av === 'string') return av.localeCompare(bv) * s.dir;
+          return (av - bv) * s.dir;
+        });
+      },
+
+      ind(tbl, key) {
+        const s = this.sort[tbl];
+        return s.key === key ? (s.dir === 1 ? ' ▲' : ' ▼') : '';
+      },
+
+      showDetails(r) {
+        this.detailName = r.name;
+        this.detailShifts = r.flagged_shifts;
+        this.detailOpen = true;
+      },
+
+      fmt(n) { return Number(n).toFixed(2); },
+    };
+  }
+</script>
 {% endblock %}

@@ -71,6 +71,19 @@ class RolePay:
 
 
 @dataclass
+class FlaggedShift:
+    """A shift behind a payroll flag, so the preview can list the specifics
+    (like the Shifts page) instead of only a count."""
+    reasons: list[str]              # e.g. ["Open — no clock-out"], ["Auto clock-out", "Under 3h"]
+    role_title: str
+    department: str
+    clock_in: str                  # ISO string
+    clock_out: str | None          # ISO string, or None if still open
+    hours: float | None            # raw duration, or None if open
+    week_start: str                # ISO date of the work week (to find it on the Shifts page)
+
+
+@dataclass
 class PayrollRow:
     employee_id: str
     name: str
@@ -89,6 +102,9 @@ class PayrollRow:
     weekly_hours: list[WeeklyHours] = field(default_factory=list)
     # Hours/pay broken out by role, sorted by (department, role_title).
     role_pay: list[RolePay] = field(default_factory=list)
+    # The individual shifts behind the flags above (open / auto-closed / short),
+    # so the preview can show details on demand.
+    flagged_shifts: list[FlaggedShift] = field(default_factory=list)
     # work-week-start -> [(clock_in, adjusted_hours, rate, role_title, department), ...]
     _week_shifts: dict[date, list[tuple]] = field(default_factory=dict)
 
@@ -157,8 +173,17 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
                 )
                 rows[shift.employee_id] = row
 
+            shift_week = week_start_for(ci, wsw).isoformat()
+
             if shift.clock_out is None:
                 row.open_shift_count += 1  # flagged, never counted as hours
+                row.flagged_shifts.append(FlaggedShift(
+                    reasons=["Open — no clock-out"],
+                    role_title=shift.role_title or "(no role)",
+                    department=shift.department or "(no department)",
+                    clock_in=shift.clock_in, clock_out=None, hours=None,
+                    week_start=shift_week,
+                ))
                 continue
 
             duration = hours_between(shift.clock_in, shift.clock_out)
@@ -167,10 +192,21 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
             # preview and CSV warn even when the Shifts page wasn't visited:
             # an uncorrected auto-clockout (bogus ~24h end time) or a shift the
             # ESA three-hour rule may top up.
+            reasons: list[str] = []
             if shift.auto_clocked_out:
                 row.auto_clocked_out_count += 1
+                reasons.append("Auto clock-out")
             if duration < SHORT_SHIFT_HOURS:
                 row.short_shift_count += 1
+                reasons.append("Under 3h")
+            if reasons:
+                row.flagged_shifts.append(FlaggedShift(
+                    reasons=reasons,
+                    role_title=shift.role_title or "(no role)",
+                    department=shift.department or "(no department)",
+                    clock_in=shift.clock_in, clock_out=shift.clock_out,
+                    hours=round(duration, 2), week_start=shift_week,
+                ))
 
             deduct = _break_minutes_for_shift(
                 duration, shift.id, overrides, settings
@@ -291,6 +327,41 @@ def compute_holiday_pay(holiday: date) -> tuple[list[HolidayPayRow], date, date]
             open_shift_count=r.open_shift_count,
         ))
     return rows, start, end
+
+
+def row_to_dict(r: PayrollRow) -> dict:
+    """Plain JSON-able view of a payroll row for the interactive preview
+    (client-side sorting + the flagged-shift detail popup)."""
+    return {
+        "employee_id": r.employee_id,
+        "name": r.name,
+        "regular_hours": r.regular_hours,
+        "overtime_hours": r.overtime_hours,
+        "regular_pay": r.regular_pay,
+        "overtime_pay": r.overtime_pay,
+        "total_pay": r.total_pay,
+        "vacation_pay": r.vacation_pay,
+        "vacation_pay_percent": r.vacation_pay_percent,
+        "open_shift_count": r.open_shift_count,
+        "auto_clocked_out_count": r.auto_clocked_out_count,
+        "short_shift_count": r.short_shift_count,
+        "below_min_wage": r.below_min_wage,
+        # Total issues, for sorting the Flags column.
+        "flag_count": (r.open_shift_count + r.auto_clocked_out_count
+                       + r.short_shift_count + (1 if r.below_min_wage else 0)),
+        "flagged_shifts": [
+            {
+                "reasons": fs.reasons,
+                "role_title": fs.role_title,
+                "department": fs.department,
+                "clock_in": fs.clock_in,
+                "clock_out": fs.clock_out,
+                "hours": fs.hours,
+                "week_start": fs.week_start,
+            }
+            for fs in r.flagged_shifts
+        ],
+    }
 
 
 def to_csv(rows: list[PayrollRow], start: date, end: date) -> str:

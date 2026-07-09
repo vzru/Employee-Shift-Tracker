@@ -168,6 +168,61 @@ class TestVacationAndFlags:
         assert "Vacation Pay" in csv_text
 
 
+class TestFlaggedShifts:
+    def test_open_shift_flagged(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        make_shift("2026-06-29T09:00:00", None)
+        r = _row(payroll.compute_payroll(*RANGE))
+        assert len(r.flagged_shifts) == 1
+        fs = r.flagged_shifts[0]
+        assert fs.reasons == ["Open — no clock-out"]
+        assert fs.clock_out is None and fs.hours is None
+        assert fs.week_start == "2026-06-28"
+
+    def test_short_shift_flagged(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        make_shift("2026-06-29T09:00:00", "2026-06-29T11:00:00")  # 2h
+        fs = _row(payroll.compute_payroll(*RANGE)).flagged_shifts
+        assert len(fs) == 1
+        assert "Under 3h" in fs[0].reasons
+        assert fs[0].hours == 2.0
+
+    def test_auto_closed_flagged(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        make_shift("2026-06-29T09:00:00", "2026-06-30T09:30:00", auto_clocked_out=True)
+        fs = _row(payroll.compute_payroll(*RANGE)).flagged_shifts
+        assert len(fs) == 1
+        assert "Auto clock-out" in fs[0].reasons
+
+    def test_clean_shift_not_flagged(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        make_shift("2026-06-29T09:00:00", "2026-06-29T17:00:00")  # 8h, clean
+        assert _row(payroll.compute_payroll(*RANGE)).flagged_shifts == []
+
+    def test_row_to_dict_shape(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        make_shift("2026-06-29T09:00:00", "2026-06-29T11:00:00")  # short
+        d = payroll.row_to_dict(_row(payroll.compute_payroll(*RANGE)))
+        assert d["name"] == "Jane Doe"
+        assert d["flag_count"] == 1
+        assert isinstance(d["flagged_shifts"], list)
+        assert d["flagged_shifts"][0]["reasons"] == ["Under 3h"]
+
+    def test_flag_count_sums_all_issues(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee(rate=5.0)  # below min wage
+        make_shift("2026-06-29T09:00:00", None)                    # open
+        make_shift("2026-06-30T09:00:00", "2026-06-30T11:00:00")   # short
+        d = payroll.row_to_dict(_row(payroll.compute_payroll(*RANGE)))
+        # 1 open + 1 short + below_min_wage(1) = 3
+        assert d["flag_count"] == 3
+
+
 class TestHolidayPay:
     def test_esa_formula(self, make_employee, make_shift, settings_writer):
         settings_writer()

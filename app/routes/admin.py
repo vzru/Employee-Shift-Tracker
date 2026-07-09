@@ -602,11 +602,28 @@ def payroll_page(
         except ValueError as exc:
             err = str(exc)
 
+    # JSON views of all three preview tables for client-side column sorting
+    # (+ the flagged-shift detail popup on the main table).
+    rlist = rows or []
+    payroll_data = {
+        "main": [payroll.row_to_dict(r) for r in rlist],
+        "weekly": [
+            {"name": r.name, "week_start": wh.week_start.isoformat(), "hours": wh.hours}
+            for r in rlist for wh in r.weekly_hours
+        ],
+        "role": [
+            {"name": r.name, "department": rp.department, "role_title": rp.role_title,
+             "hours": rp.hours, "pay": rp.pay}
+            for r in rlist for rp in r.role_pay
+        ],
+    }
+
     return templates.TemplateResponse(
         request,
         "admin_payroll.html",
         {
             "rows": rows,
+            "payroll_data": payroll_data,
             "start": start or "",
             "end": end or "",
             "totals": _totals(rows) if rows else None,
