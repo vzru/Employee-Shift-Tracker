@@ -144,6 +144,68 @@ def find_open_shift(employee_id: str, wsw: int | None = None) -> Optional[tuple[
     return None
 
 
+def find_recent_closed_shift(
+    employee_id: str, before_iso: str, buffer_minutes: float,
+    role_id: Optional[str] = None, wsw: int | None = None,
+) -> Optional[tuple[date, Shift]]:
+    """
+    The most recently CLOSED, non-voided shift for the employee whose clock_out
+    falls within ``buffer_minutes`` before ``before_iso`` (and whose role_id
+    matches ``role_id`` when given). Used to re-open a shift after an accidental
+    clock-out — see kiosk clock handling. Returns (week_start, shift) or None.
+    """
+    before = parse_iso(before_iso)
+    best: Optional[tuple[date, Shift]] = None
+    best_out = None
+    for week_start in _recent_week_keys(wsw=wsw):
+        for s in load_week_shifts(week_start):
+            if s.employee_id != employee_id or s.voided or s.clock_out is None:
+                continue
+            if role_id is not None and s.role_id != role_id:
+                continue
+            out = parse_iso(s.clock_out)
+            gap_minutes = (before - out).total_seconds() / 60.0
+            if 0 <= gap_minutes <= buffer_minutes and (best_out is None or out > best_out):
+                best, best_out = (week_start, s), out
+    return best
+
+
+def reopen_shift(week_start: date, shift_id: str) -> None:
+    """Re-open a closed shift (undo a clock-out): clear clock_out/hours and the
+    auto-clockout flag so the original shift simply continues."""
+    def mutator(current: list[dict]) -> list[dict]:
+        for s in current:
+            if s["id"] == shift_id:
+                s["clock_out"] = None
+                s["hours"] = None
+                s["auto_clocked_out"] = False
+        return current
+
+    storage.update_json(paths.shifts_file(week_start), default=[], mutator=mutator)
+
+
+def remove_shift(week_start: date, shift_id: str) -> None:
+    """Hard-delete a shift from its week file. Used only to undo an accidental
+    clock-in within the safety buffer — the shift was never a real one, so
+    (unlike voiding) nothing is kept. The action is recorded in the audit log
+    by the caller.
+
+    SAFETY: only removes the shift if it is still OPEN (clock_out is None),
+    re-checked here under the storage lock. If a real clock-out landed between
+    the caller's read and this write, the now-closed shift is a genuine record
+    and is kept — never hard-deleted. A voided shift is likewise left alone.
+    """
+    def mutator(current: list[dict]) -> list[dict]:
+        return [
+            s for s in current
+            if not (s["id"] == shift_id
+                    and s.get("clock_out") is None
+                    and not s.get("voided"))
+        ]
+
+    storage.update_json(paths.shifts_file(week_start), default=[], mutator=mutator)
+
+
 def open_shifts_by_employee(wsw: int | None = None) -> dict[str, Shift]:
     """Map employee_id -> their open Shift, across recent weeks (for the kiosk).
     Voided shifts are ignored."""
@@ -323,6 +385,51 @@ def clock_in(
         role_title=role.title,
         department=role.department,
         hourly_rate=role.hourly_rate,
+    )
+
+    def mutator(current: list[dict]) -> list[dict]:
+        current.append(shift.model_dump())
+        return current
+
+    storage.update_json(paths.shifts_file(week_start), default=[], mutator=mutator)
+    return shift
+
+
+def add_shift(
+    employee_id: str, clock_in_iso: str, clock_out_iso: str, role_id: str,
+    wsw: int | None = None, employee: Optional[Employee] = None,
+) -> Shift:
+    """
+    Admin manual entry of a COMPLETED historical shift (both times required).
+    Snapshots the role's title/department/hourly_rate like clock_in, files the
+    shift in the work week of its clock-in time, and computes the raw "hours".
+    Unlike the kiosk this has no past-date bound — the admin is entering
+    corrected history. Atomic under the storage lock.
+    """
+    if wsw is None:
+        wsw = _week_start_weekday()
+    if employee is None:
+        employee = get_employee(employee_id)
+    if employee is None:
+        raise ValueError("Unknown employee.")
+    role = next((r for r in employee.roles if r.id == role_id), None)
+    if role is None:
+        raise ValueError("Unknown role.")
+    if parse_iso(clock_out_iso) < parse_iso(clock_in_iso):
+        raise ValueError("Clock-out time cannot be before clock-in time.")
+
+    when = parse_iso(clock_in_iso)
+    week_start = week_start_for(when, wsw)
+    shift = Shift(
+        id=new_id(),
+        employee_id=employee_id,
+        clock_in=clock_in_iso,
+        clock_out=clock_out_iso,
+        role_id=role.id,
+        role_title=role.title,
+        department=role.department,
+        hourly_rate=role.hourly_rate,
+        hours=round(hours_between(clock_in_iso, clock_out_iso), 2),
     )
 
     def mutator(current: list[dict]) -> list[dict]:

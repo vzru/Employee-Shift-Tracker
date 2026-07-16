@@ -70,4 +70,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="assets/app_icon.ico",
+    # Embed CompanyName/ProductName/version so antivirus reputation scanners
+    # see a named, versioned binary rather than an anonymous one.
+    version="version_info.txt",
 )

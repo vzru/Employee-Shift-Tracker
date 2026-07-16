@@ -27,6 +27,89 @@
   </form>
 </div>
 
+<!-- Add a shift manually (admin correction / back-fill; no past-date limit) -->
+<div class="mt-4">
+  <button type="button" @click="addOpen = !addOpen"
+          class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">
+    <span x-show="!addOpen">+ Add shift</span>
+    <span x-show="addOpen" x-cloak>Cancel</span>
+  </button>
+
+  <div x-show="addOpen" x-cloak class="mt-3 rounded-xl border border-slate-200 bg-white p-4">
+    <form method="post" action="/admin/shifts/add" class="flex flex-wrap items-end gap-4"
+          @submit="if (!addForm.employee_id || !addForm.role_id) { $event.preventDefault(); alert('Choose an employee and a role.'); }">
+      <input type="hidden" name="week_start" value="{{ week_start.isoformat() }}">
+
+      <label class="block">
+        <span class="text-xs font-medium text-slate-500">Employee</span>
+        <select name="employee_id" x-model="addForm.employee_id" @change="addForm.role_id = ''"
+                class="mt-1 block w-56 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+          <option value="">— choose —</option>
+          <template x-for="e in addEmployees" :key="e.id">
+            <option :value="e.id" x-text="e.name"></option>
+          </template>
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="text-xs font-medium text-slate-500">Role</span>
+        <select name="role_id" x-model="addForm.role_id"
+                class="mt-1 block w-56 rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+          <option value="">— choose —</option>
+          <template x-for="r in addRoles" :key="r.id">
+            <option :value="r.id" x-text="r.title + ' — ' + r.department"></option>
+          </template>
+        </select>
+      </label>
+
+      <!-- Clock in: date + time in 5-minute steps -->
+      <div>
+        <span class="text-xs font-medium text-slate-500">Clock in</span>
+        <div class="mt-1 flex flex-wrap items-center gap-1.5">
+          <input type="date" x-model="addCi.date" required
+                 class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+          <select x-model.number="addCi.hour" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+            {% for h in range(1, 13) %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+          </select>
+          <span class="text-slate-400">:</span>
+          <select x-model.number="addCi.minute" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+            {% for m in range(0, 60, 5) %}<option value="{{ m }}">{{ '%02d'|format(m) }}</option>{% endfor %}
+          </select>
+          <select x-model="addCi.ampm" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+            <option value="AM">AM</option><option value="PM">PM</option>
+          </select>
+        </div>
+        <input type="hidden" name="clock_in" :value="combine(addCi)">
+      </div>
+
+      <!-- Clock out: date + time in 5-minute steps -->
+      <div>
+        <span class="text-xs font-medium text-slate-500">Clock out</span>
+        <div class="mt-1 flex flex-wrap items-center gap-1.5">
+          <input type="date" x-model="addCo.date" required
+                 class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+          <select x-model.number="addCo.hour" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+            {% for h in range(1, 13) %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+          </select>
+          <span class="text-slate-400">:</span>
+          <select x-model.number="addCo.minute" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+            {% for m in range(0, 60, 5) %}<option value="{{ m }}">{{ '%02d'|format(m) }}</option>{% endfor %}
+          </select>
+          <select x-model="addCo.ampm" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
+            <option value="AM">AM</option><option value="PM">PM</option>
+          </select>
+        </div>
+        <input type="hidden" name="clock_out" :value="combine(addCo)">
+      </div>
+
+      <button type="submit" class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500">Add shift</button>
+    </form>
+    <p class="mt-2 text-xs text-slate-400">
+      For back-filling a shift someone forgot to clock. It files into the week of the clock-in date automatically.
+    </p>
+  </div>
+</div>
+
 {% if open_count %}
 <div class="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
   <strong>{{ open_count }}</strong> open shift(s) this week have no clock-out. Correct them in the shift details — open shifts are excluded from payroll.
@@ -160,11 +243,11 @@
                         <input type="date" x-model="editCi.date" required
                                class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
                         <select x-model.number="editCi.hour" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
-                          <template x-for="h in 12" :key="h"><option :value="h" x-text="h"></option></template>
+                          {% for h in range(1, 13) %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
                         </select>
                         <span class="text-slate-400">:</span>
                         <select x-model.number="editCi.minute" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
-                          <template x-for="m in 12" :key="(m - 1) * 5"><option :value="(m - 1) * 5" x-text="String((m - 1) * 5).padStart(2, '0')"></option></template>
+                          {% for m in range(0, 60, 5) %}<option value="{{ m }}">{{ '%02d'|format(m) }}</option>{% endfor %}
                         </select>
                         <select x-model="editCi.ampm" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
                           <option value="AM">AM</option><option value="PM">PM</option>
@@ -183,11 +266,11 @@
                         <input type="date" x-model="editCo.date" :disabled="editCo.open"
                                class="rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
                         <select x-model.number="editCo.hour" :disabled="editCo.open" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
-                          <template x-for="h in 12" :key="h"><option :value="h" x-text="h"></option></template>
+                          {% for h in range(1, 13) %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
                         </select>
                         <span class="text-slate-400">:</span>
                         <select x-model.number="editCo.minute" :disabled="editCo.open" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
-                          <template x-for="m in 12" :key="(m - 1) * 5"><option :value="(m - 1) * 5" x-text="String((m - 1) * 5).padStart(2, '0')"></option></template>
+                          {% for m in range(0, 60, 5) %}<option value="{{ m }}">{{ '%02d'|format(m) }}</option>{% endfor %}
                         </select>
                         <select x-model="editCo.ampm" :disabled="editCo.open" class="rounded-lg border border-slate-300 px-1.5 py-1.5 text-sm">
                           <option value="AM">AM</option><option value="PM">PM</option>
@@ -235,6 +318,16 @@
       detailsOpen: false,
       selectedId: null,
       editingShiftId: null,
+      // "Add shift" form state.
+      addEmployees: {{ add_employees | tojson }},
+      addOpen: false,
+      addForm: { employee_id: '', role_id: '' },
+      addCi: { date: '{{ now_value.split("T")[0] }}', hour: 9, minute: 0, ampm: 'AM' },
+      addCo: { date: '{{ now_value.split("T")[0] }}', hour: 5, minute: 0, ampm: 'PM' },
+      get addRoles() {
+        const e = this.addEmployees.find(e => e.id === this.addForm.employee_id);
+        return e ? e.roles : [];
+      },
       // Edit-form time state (date + 12h clock + 5-min minute + AM/PM), so the
       // pickers only ever offer 5-minute increments (native datetime-local
       // ignores `step` for its minute list in some browsers).
@@ -256,12 +349,20 @@
 
       // Parse a stored "YYYY-MM-DDTHH:MM" into the editable parts, rounding the
       // minute to the nearest 5 so it lands on one of the offered options.
+      // Uses a Date so a round-up past :55 carries into the hour AND the day
+      // correctly (e.g. 11:58 PM -> 12:00 AM the NEXT day, not the same day).
       parseInput(v) {
-        const [d, t] = v.split('T');
-        let [hh, mm] = t.split(':').map(Number);
-        mm = Math.round(mm / 5) * 5;
-        if (mm === 60) { mm = 0; hh = (hh + 1) % 24; }
-        return { date: d, hour: (hh % 12 === 0 ? 12 : hh % 12), minute: mm, ampm: hh >= 12 ? 'PM' : 'AM' };
+        const dt = new Date(v);                         // local time (no TZ suffix)
+        dt.setSeconds(0, 0);
+        dt.setMinutes(Math.round(dt.getMinutes() / 5) * 5);  // JS normalizes 60 -> next hour/day
+        const hh = dt.getHours();
+        const iso = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+        return {
+          date: iso,
+          hour: (hh % 12 === 0 ? 12 : hh % 12),
+          minute: dt.getMinutes(),
+          ampm: hh >= 12 ? 'PM' : 'AM',
+        };
       },
       // Recombine editable parts back into "YYYY-MM-DDTHH:MM" (24h) for submit.
       combine(x) {

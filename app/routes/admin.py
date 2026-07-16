@@ -14,8 +14,8 @@ from fastapi.responses import RedirectResponse, Response
 from .. import audit, payroll, repo, security
 from ..deps import redirect, require_admin, templates
 from ..models import (
-    AutoClockoutSettings, BreakSettings, Employee, MinWageSettings,
-    OvertimeSettings, Role, Settings,
+    AutoClockoutSettings, BreakSettings, ClockSafetySettings, Employee,
+    MinWageSettings, OvertimeSettings, Role, Settings,
 )
 from ..timeutil import (
     hours_between, now_local, parse_iso, to_iso, week_end_for, week_start_for,
@@ -191,6 +191,7 @@ def employee_add(
     request: Request,
     first_name: str = Form(...),
     last_name: str = Form(...),
+    preferred_name: str = Form(""),
     roles_json: str = Form("[]"),
     active: str | None = Form(None),
     vacation_pay_percent: float = Form(4.0),
@@ -209,6 +210,7 @@ def employee_add(
         id=repo.new_id(),
         first_name=first_name,
         last_name=last_name,
+        preferred_name=preferred_name.strip(),
         active=active is not None,
         roles=roles,
         vacation_pay_percent=max(0.0, vacation_pay_percent),
@@ -218,6 +220,7 @@ def employee_add(
     audit.log(
         "employee_added", "admin",
         employee_id=new_employee.id, first_name=first_name, last_name=last_name,
+        preferred_name=new_employee.preferred_name,
         active=new_employee.active, roles=[r.model_dump() for r in roles],
         vacation_pay_percent=new_employee.vacation_pay_percent,
     )
@@ -230,6 +233,7 @@ def employee_edit(
     employee_id: str,
     first_name: str = Form(...),
     last_name: str = Form(...),
+    preferred_name: str = Form(""),
     roles_json: str = Form("[]"),
     active: str | None = Form(None),
     vacation_pay_percent: float = Form(4.0),
@@ -245,12 +249,15 @@ def employee_edit(
         if e.id == employee_id:
             new_first = first_name.strip() or e.first_name
             new_last = last_name.strip() or e.last_name
+            new_preferred = preferred_name.strip()
             new_active = active is not None
             new_vacation = max(0.0, vacation_pay_percent)
             if e.first_name != new_first:
                 changes["first_name"] = [e.first_name, new_first]
             if e.last_name != new_last:
                 changes["last_name"] = [e.last_name, new_last]
+            if e.preferred_name != new_preferred:
+                changes["preferred_name"] = [e.preferred_name, new_preferred]
             if e.active != new_active:
                 changes["active"] = [e.active, new_active]
             if e.vacation_pay_percent != new_vacation:
@@ -261,6 +268,7 @@ def employee_edit(
                 changes["roles"] = [old_roles, new_roles]
             e.first_name = new_first
             e.last_name = new_last
+            e.preferred_name = new_preferred
             e.active = new_active
             e.vacation_pay_percent = new_vacation
             e.roles = roles
@@ -322,7 +330,20 @@ def shifts_page(
     ws = week_start_for(ref, wsw)
     we = week_end_for(ws)
 
-    names = {e.id: e.name for e in repo.load_employees()}
+    all_employees = repo.load_employees()
+    names = {e.id: e.name for e in all_employees}
+    # Active employees + their roles, for the "Add shift" form dropdowns.
+    add_employees = [
+        {
+            "id": e.id,
+            "name": e.name,
+            "roles": [
+                {"id": r.id, "title": r.title, "department": r.department}
+                for r in e.roles
+            ],
+        }
+        for e in all_employees if e.active
+    ]
     overrides = repo.load_adjustments(ws)
     shifts = repo.load_week_shifts(ws)
 
@@ -358,6 +379,8 @@ def shifts_page(
             "prev_week_start": ws - timedelta(days=7),
             "next_week_start": ws + timedelta(days=7),
             "shifts": view,
+            "add_employees": add_employees,
+            "now_value": now_local().strftime(TS_FORMAT_MINUTE),
             "summary": _employee_summary(view),
             # Open count excludes voided shifts (they're operationally "removed").
             "open_count": sum(1 for v in view if v["open"] and not v["voided"]),
@@ -463,6 +486,43 @@ def shift_edit(
     return redirect(f"/admin/shifts?week_start={week_start}&ok=Shift+updated")
 
 
+@router.post("/shifts/add")
+def shift_add(
+    request: Request,
+    week_start: str = Form(...),   # the week currently being viewed (for redirect)
+    employee_id: str = Form(...),
+    role_id: str = Form(...),
+    clock_in: str = Form(...),
+    clock_out: str = Form(...),
+    _: bool = Depends(require_admin),
+):
+    """Admin manual entry of a completed historical shift. No past-date bound
+    (the admin is correcting the record); files into the week of the clock-in
+    and redirects there so the new shift is visible."""
+    wsw = repo.load_settings().overtime.week_start_weekday
+    try:
+        ci = to_iso(parse_iso(clock_in))
+        co = to_iso(parse_iso(clock_out))
+    except (ValueError, TypeError):
+        return redirect(f"/admin/shifts?week_start={week_start}&err=Invalid+time")
+
+    try:
+        shift = repo.add_shift(employee_id, ci, co, role_id, wsw=wsw)
+    except ValueError as exc:
+        return redirect(
+            f"/admin/shifts?week_start={week_start}&err={str(exc).replace(' ', '+')}"
+        )
+
+    audit.log(
+        "shift_added", "admin", shift_id=shift.id, employee_id=employee_id,
+        role_id=role_id, role_title=shift.role_title, department=shift.department,
+        clock_in=ci, clock_out=co,
+    )
+    # Land on the week the shift was filed in (may differ from the viewed week).
+    landed = week_start_for(parse_iso(ci), wsw).isoformat()
+    return redirect(f"/admin/shifts?week_start={landed}&ok=Shift+added")
+
+
 @router.post("/shifts/void")
 def shift_void(
     request: Request,
@@ -555,6 +615,9 @@ def settings_save(
     # automatic clock-out
     auto_clockout_enabled: str | None = Form(None),
     auto_clockout_threshold_hours: float = Form(24.0),
+    # clock safety buffer (undo mis-taps)
+    clock_safety_enabled: str | None = Form(None),
+    clock_buffer_minutes: int = Form(15),
     _: bool = Depends(require_admin),
 ):
     settings = Settings(
@@ -574,6 +637,13 @@ def settings_save(
         auto_clockout=AutoClockoutSettings(
             enabled=auto_clockout_enabled is not None,
             threshold_hours=auto_clockout_threshold_hours,
+        ),
+        clock_safety=ClockSafetySettings(
+            enabled=clock_safety_enabled is not None,
+            # Hard-capped at 60: any shift shorter than the buffer is removed on
+            # clock-out, so an oversized value would start deleting real short
+            # shifts. Keep it to a few minutes (mis-tap correction only).
+            buffer_minutes=max(0, min(60, clock_buffer_minutes)),
         ),
     )
     repo.save_settings(settings)
@@ -693,8 +763,10 @@ def payroll_export(
     rows = payroll.compute_payroll(parsed_start, parsed_end)
     csv_text = payroll.to_csv(rows, parsed_start, parsed_end)
     filename = f"payroll_{start}_to_{end}.csv"
+    # Encode with a UTF-8 BOM (utf-8-sig) so Excel — including French-locale
+    # Windows — reads accented employee names correctly instead of as mojibake.
     return Response(
-        content=csv_text,
-        media_type="text/csv",
+        content=csv_text.encode("utf-8-sig"),
+        media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

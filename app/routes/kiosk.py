@@ -46,7 +46,7 @@ def dashboard(request: Request, ok: str | None = None, err: str | None = None):
             cards.append({
                 "employee_id": e.id,
                 "role_id": role.id,
-                "name": e.name,
+                "name": e.short_name,  # kiosk shows first name + last initial
                 "role_title": role.title,
                 "department": role.department,
                 "clocked_in": is_open_role,
@@ -61,7 +61,7 @@ def dashboard(request: Request, ok: str | None = None, err: str | None = None):
             cards.append({
                 "employee_id": e.id,
                 "role_id": open_shift.role_id or "",
-                "name": e.name,
+                "name": e.short_name,
                 "role_title": open_shift.role_title or "(role removed)",
                 "department": open_shift.department or "(no department)",
                 "clocked_in": True,
@@ -124,7 +124,9 @@ def clock(
 
     # Load settings and the employee once and reuse them below (avoids
     # re-reading admin.json / employees.json several times per clock action).
-    wsw = repo.load_settings().overtime.week_start_weekday
+    settings = repo.load_settings()
+    wsw = settings.overtime.week_start_weekday
+    cs = settings.clock_safety
     employee = repo.get_employee(employee_id)
     if employee is None:
         return RedirectResponse("/?err=Unknown+employee", status_code=303)
@@ -149,25 +151,68 @@ def clock(
             status_code=303,
         )
 
+    buffer_seconds = cs.buffer_minutes * 60
     try:
         found = repo.find_open_shift(employee_id, wsw)
         if found is not None:
-            shift = repo.clock_out(employee_id, stamp, located=found)
-            audit.log(
-                "clock_out", "kiosk", employee_id=employee_id, name=employee.name,
-                shift_id=shift.id, timestamp=stamp,
-            )
-            msg = f"{employee.name}+clocked+out"
+            week_start, open_shift = found
+            # CRITICAL: measure how long the shift has ACTUALLY been open using
+            # real wall-clock time (now - clock_in), NOT the employee-editable
+            # submitted timestamp. A real long shift was clocked in hours ago, so
+            # real elapsed time is always > buffer and it can never be deleted —
+            # even if someone edits the clock-out field to near the clock-in
+            # time. Only a shift genuinely opened moments ago (a true mis-tap)
+            # can match the window.
+            open_seconds = (now - parse_iso(open_shift.clock_in)).total_seconds()
+            if cs.enabled and 0 <= open_seconds <= buffer_seconds:
+                # Undo an accidental clock-in: the shift was opened only moments
+                # ago, so remove it entirely instead of recording a tiny shift.
+                # remove_shift re-checks under the lock that it's still open, so a
+                # clock-out that landed concurrently is never hard-deleted.
+                repo.remove_shift(week_start, open_shift.id)
+                audit.log(
+                    "clock_in_cancelled", "kiosk",
+                    employee_id=employee_id, name=employee.name,
+                    shift_id=open_shift.id, clock_in=open_shift.clock_in, timestamp=stamp,
+                )
+                msg = f"{employee.name}+clock-in+undone"
+            else:
+                shift = repo.clock_out(employee_id, stamp, located=found)
+                audit.log(
+                    "clock_out", "kiosk", employee_id=employee_id, name=employee.name,
+                    shift_id=shift.id, timestamp=stamp,
+                )
+                msg = f"{employee.name}+clocked+out"
         else:
             if not role_id:
                 return RedirectResponse("/?err=Choose+a+role", status_code=303)
-            shift = repo.clock_in(employee_id, stamp, role_id, wsw=wsw, employee=employee)
-            audit.log(
-                "clock_in", "kiosk", employee_id=employee_id, name=employee.name,
-                shift_id=shift.id, role_id=role_id, role_title=shift.role_title,
-                department=shift.department, timestamp=stamp,
+            # Undo an accidental clock-out: if this same-role shift was clocked
+            # out within the buffer, re-open it so the original shift continues
+            # rather than starting a fresh one. Uses real ``now`` as the
+            # reference (like the delete path) so an edited clock-in timestamp
+            # can't reach back and re-open an older shift.
+            reopen = (
+                repo.find_recent_closed_shift(
+                    employee_id, to_iso(now), cs.buffer_minutes, role_id=role_id, wsw=wsw)
+                if cs.enabled else None
             )
-            msg = f"{employee.name}+clocked+in"
+            if reopen is not None:
+                reopen_week, reopen_shift = reopen
+                repo.reopen_shift(reopen_week, reopen_shift.id)
+                audit.log(
+                    "clock_out_undone", "kiosk",
+                    employee_id=employee_id, name=employee.name,
+                    shift_id=reopen_shift.id, role_id=role_id, timestamp=stamp,
+                )
+                msg = f"{employee.name}+clocked+in"
+            else:
+                shift = repo.clock_in(employee_id, stamp, role_id, wsw=wsw, employee=employee)
+                audit.log(
+                    "clock_in", "kiosk", employee_id=employee_id, name=employee.name,
+                    shift_id=shift.id, role_id=role_id, role_title=shift.role_title,
+                    department=shift.department, timestamp=stamp,
+                )
+                msg = f"{employee.name}+clocked+in"
     except ValueError as exc:
         return RedirectResponse(f"/?err={str(exc).replace(' ', '+')}", status_code=303)
 

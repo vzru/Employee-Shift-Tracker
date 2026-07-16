@@ -114,6 +114,120 @@ class TestClockOut:
             repo.clock_out("e1", "2026-06-29T08:00:00")
 
 
+class TestAddShift:
+    def test_creates_completed_shift_in_right_week(self, make_employee, settings_writer):
+        settings_writer()
+        make_employee(rate=21.0)
+        shift = repo.add_shift("e1", "2026-06-29T09:00:00", "2026-06-29T17:00:00", "r1")
+        assert shift.clock_in == "2026-06-29T09:00:00"
+        assert shift.clock_out == "2026-06-29T17:00:00"
+        assert shift.hours == 8.0
+        # Snapshots the role like a live clock-in.
+        assert shift.role_title == "Cook"
+        assert shift.department == "Restaurant"
+        assert shift.hourly_rate == 21.0
+        ws = timeutil.week_start_for(timeutil.parse_iso("2026-06-29T09:00:00"), 6)
+        stored = repo.load_week_shifts(ws)
+        assert len(stored) == 1 and stored[0].id == shift.id
+
+    def test_no_past_bound(self, make_employee, settings_writer):
+        # Unlike the kiosk, admin entry can back-fill arbitrarily old shifts.
+        settings_writer()
+        make_employee()
+        shift = repo.add_shift("e1", "2024-01-02T09:00:00", "2024-01-02T12:00:00", "r1")
+        ws = timeutil.week_start_for(timeutil.parse_iso("2024-01-02T09:00:00"), 6)
+        assert next(s for s in repo.load_week_shifts(ws) if s.id == shift.id)
+
+    def test_rejects_out_before_in(self, make_employee, settings_writer):
+        settings_writer()
+        make_employee()
+        with pytest.raises(ValueError, match="before clock-in"):
+            repo.add_shift("e1", "2026-06-29T17:00:00", "2026-06-29T09:00:00", "r1")
+
+    def test_unknown_employee(self, data_dir, settings_writer):
+        settings_writer()
+        with pytest.raises(ValueError, match="Unknown employee"):
+            repo.add_shift("ghost", "2026-06-29T09:00:00", "2026-06-29T17:00:00", "r1")
+
+    def test_unknown_role(self, make_employee, settings_writer):
+        settings_writer()
+        make_employee()
+        with pytest.raises(ValueError, match="Unknown role"):
+            repo.add_shift("e1", "2026-06-29T09:00:00", "2026-06-29T17:00:00", "bad-role")
+
+
+class TestClockSafetyRepo:
+    def _seed_closed(self, make_shift, minutes_ago_out, hours_len=3, role_id="r1",
+                     auto=False):
+        now = timeutil.now_local()
+        co = now - timedelta(minutes=minutes_ago_out)
+        ci = co - timedelta(hours=hours_len)
+        return make_shift(timeutil.to_iso(ci), timeutil.to_iso(co),
+                          role_id=role_id, auto_clocked_out=auto), now
+
+    def test_find_recent_closed_within_buffer(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        _sid, now = self._seed_closed(make_shift, minutes_ago_out=5)
+        found = repo.find_recent_closed_shift("e1", timeutil.to_iso(now), 15, role_id="r1")
+        assert found is not None
+
+    def test_find_recent_closed_outside_buffer(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        _sid, now = self._seed_closed(make_shift, minutes_ago_out=30)
+        assert repo.find_recent_closed_shift("e1", timeutil.to_iso(now), 15, role_id="r1") is None
+
+    def test_find_recent_closed_role_mismatch(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        _sid, now = self._seed_closed(make_shift, minutes_ago_out=5, role_id="r1")
+        assert repo.find_recent_closed_shift("e1", timeutil.to_iso(now), 15, role_id="r2") is None
+
+    def test_reopen_shift_clears_closeout(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        sid, _now = self._seed_closed(make_shift, minutes_ago_out=5, auto=True)
+        ws = timeutil.week_start_for(
+            timeutil.parse_iso(_find_shift(sid).clock_in), 6)
+        repo.reopen_shift(ws, sid)
+        s = _find_shift(sid)
+        assert s.clock_out is None and s.hours is None and s.auto_clocked_out is False
+
+    def test_remove_shift_deletes_open_shift(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        now = timeutil.now_local()
+        sid = make_shift(timeutil.to_iso(now - timedelta(minutes=3)), None)  # open
+        ws = timeutil.week_start_for(timeutil.parse_iso(_find_shift(sid).clock_in), 6)
+        repo.remove_shift(ws, sid)
+        assert _find_shift(sid) is None
+
+    def test_remove_shift_keeps_closed_shift(self, make_employee, make_shift, settings_writer):
+        # SAFETY: a shift that has been closed is a real record — remove_shift
+        # must never hard-delete it (guards against a concurrent clock-out).
+        settings_writer()
+        make_employee()
+        sid, _now = self._seed_closed(make_shift, minutes_ago_out=5)
+        ws = timeutil.week_start_for(timeutil.parse_iso(_find_shift(sid).clock_in), 6)
+        repo.remove_shift(ws, sid)
+        assert _find_shift(sid) is not None
+
+
+def _all_recent_shifts():
+    out = []
+    for wk in repo._recent_week_keys():
+        out.extend(repo.load_week_shifts(wk))
+    return out
+
+
+def _find_shift(shift_id):
+    for s in _all_recent_shifts():
+        if s.id == shift_id:
+            return s
+    return None
+
+
 class TestFindOpenShift:
     def test_finds_and_none(self, make_employee, settings_writer):
         settings_writer()

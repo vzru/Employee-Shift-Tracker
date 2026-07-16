@@ -167,6 +167,30 @@ class TestVacationAndFlags:
         assert "3-HOUR RULE" in csv_text
         assert "Vacation Pay" in csv_text
 
+    def test_csv_has_new_sections_and_totals(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee(rate=20.0)
+        make_shift("2026-06-29T09:00:00", "2026-06-29T13:00:00")  # 4h paid, $80
+        csv_text = payroll.to_csv(payroll.compute_payroll(*RANGE), *RANGE)
+        # New header/metadata + columns.
+        assert "Generated " in csv_text
+        assert "Total Payable" in csv_text and "Total Hours" in csv_text
+        # Grand-totals row.
+        assert "TOTAL" in csv_text
+        # Itemized timesheet section with the shift's date and times.
+        assert "Itemized shifts" in csv_text
+        assert "2026-06-29" in csv_text and "09:00" in csv_text and "13:00" in csv_text
+
+    def test_shift_details_populated_and_sorted(self, make_employee, make_shift, settings_writer):
+        settings_writer()
+        make_employee()
+        make_shift("2026-06-30T09:00:00", "2026-06-30T17:00:00")
+        make_shift("2026-06-29T09:00:00", "2026-06-29T12:00:00")
+        r = _row(payroll.compute_payroll(*RANGE))
+        assert [d.date for d in r.shift_details] == ["2026-06-29", "2026-06-30"]
+        assert r.shift_details[0].paid_hours == 3.0
+        assert r.shift_details[0].clock_out == "12:00"
+
 
 class TestFlaggedShifts:
     def test_open_shift_flagged(self, make_employee, make_shift, settings_writer):

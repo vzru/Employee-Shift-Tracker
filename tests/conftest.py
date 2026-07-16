@@ -29,9 +29,10 @@ def data_dir(tmp_path: Path, monkeypatch) -> Path:
 def make_employee(data_dir: Path):
     """Append an employee record to employees.json and return its dict."""
     def _make(emp_id="e1", first="Jane", last="Doe", rate=20.0, active=True,
-              vacation_pay_percent=4.0, roles=None):
+              vacation_pay_percent=4.0, roles=None, preferred_name=""):
         emp = {
             "id": emp_id, "first_name": first, "last_name": last,
+            "preferred_name": preferred_name,
             "active": active, "vacation_pay_percent": vacation_pay_percent,
             "roles": roles if roles is not None else [
                 {"id": "r1", "title": "Cook", "department": "Restaurant",
@@ -76,7 +77,8 @@ def make_shift(data_dir: Path):
 def _settings_dict(break_enabled=False, break_minutes=30, break_trigger=5.0,
                    ot_enabled=False, ot_threshold=44.0, ot_multiplier=1.5,
                    week_start_weekday=6, min_wage=17.60,
-                   auto_enabled=False, auto_threshold=24.0):
+                   auto_enabled=False, auto_threshold=24.0,
+                   clock_safety_enabled=False, clock_buffer_minutes=15):
     return {
         "break_rules": {"enabled": break_enabled, "duration_minutes": break_minutes,
                         "trigger_hours": break_trigger},
@@ -85,6 +87,8 @@ def _settings_dict(break_enabled=False, break_minutes=30, break_trigger=5.0,
                      "week_start_weekday": week_start_weekday},
         "min_wage": {"rate": min_wage},
         "auto_clockout": {"enabled": auto_enabled, "threshold_hours": auto_threshold},
+        "clock_safety": {"enabled": clock_safety_enabled,
+                         "buffer_minutes": clock_buffer_minutes},
         "role_catalog": {"Restaurant": ["Cook"]},
     }
 

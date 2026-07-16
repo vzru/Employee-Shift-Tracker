@@ -103,6 +103,23 @@ class TestEmployees:
         assert emps[0].vacation_pay_percent == 6.0
         assert emps[0].name == "New Hire"
 
+    def test_add_with_preferred_name(self, admin_client):
+        roles = json.dumps([{"title": "Cook", "department": "Restaurant", "hourly_rate": 20}])
+        admin_client.post("/admin/employees/add", data={
+            "first_name": "Kulbir K", "last_name": "Johal", "preferred_name": "Kevin",
+            "roles_json": roles, "active": "on", "vacation_pay_percent": "4"})
+        e = repo.load_employees()[0]
+        assert e.preferred_name == "Kevin"
+        assert e.short_name == "Kevin J."
+
+    def test_edit_preferred_name(self, admin_client, make_employee):
+        make_employee(emp_id="e1", first="Kulbir K", last="Johal")
+        roles = json.dumps([{"id": "r1", "title": "Cook", "department": "Restaurant", "hourly_rate": 20}])
+        admin_client.post("/admin/employees/e1/edit", data={
+            "first_name": "Kulbir K", "last_name": "Johal", "preferred_name": "Kevin",
+            "roles_json": roles, "active": "on", "vacation_pay_percent": "4"})
+        assert repo.get_employee("e1").preferred_name == "Kevin"
+
     def test_add_requires_name(self, admin_client):
         roles = json.dumps([{"title": "Cook", "department": "Restaurant", "hourly_rate": 20}])
         r = admin_client.post("/admin/employees/add", data={
@@ -183,6 +200,40 @@ class TestShifts:
         r = admin_client.post("/admin/shifts/void", data={
             "week_start": "2026-06-28", "shift_id": sid, "voided": "true"})
         assert "Shift+voided" in r.headers["location"]
+
+    def test_add_shift(self, admin_client, make_employee):
+        make_employee()
+        r = admin_client.post("/admin/shifts/add", data={
+            "week_start": "2026-06-28", "employee_id": "e1", "role_id": "r1",
+            "clock_in": "2026-06-29T09:00", "clock_out": "2026-06-29T17:00"})
+        assert "Shift+added" in r.headers["location"]
+        # Landed in the week of the clock-in (Sunday 2026-06-28).
+        assert "week_start=2026-06-28" in r.headers["location"]
+        from datetime import date as _date
+        stored = repo.load_week_shifts(_date(2026, 6, 28))
+        assert len(stored) == 1 and stored[0].hours == 8.0
+
+    def test_add_shift_back_dated_no_limit(self, admin_client, make_employee):
+        # Admin entry ignores the kiosk's 7-day past bound.
+        make_employee()
+        r = admin_client.post("/admin/shifts/add", data={
+            "week_start": "2026-06-28", "employee_id": "e1", "role_id": "r1",
+            "clock_in": "2024-01-02T09:00", "clock_out": "2024-01-02T12:00"})
+        assert "Shift+added" in r.headers["location"]
+        assert "week_start=2023-12-31" in r.headers["location"]  # Sunday of that week
+
+    def test_add_shift_out_before_in_is_friendly(self, admin_client, make_employee):
+        make_employee()
+        r = admin_client.post("/admin/shifts/add", data={
+            "week_start": "2026-06-28", "employee_id": "e1", "role_id": "r1",
+            "clock_in": "2026-06-29T17:00", "clock_out": "2026-06-29T09:00"})
+        assert "before+clock-in" in r.headers["location"]
+
+    def test_add_shift_unknown_employee_is_friendly(self, admin_client):
+        r = admin_client.post("/admin/shifts/add", data={
+            "week_start": "2026-06-28", "employee_id": "ghost", "role_id": "r1",
+            "clock_in": "2026-06-29T09:00", "clock_out": "2026-06-29T17:00"})
+        assert "Unknown+employee" in r.headers["location"]
 
 
 # --- Settings ----------------------------------------------------------------

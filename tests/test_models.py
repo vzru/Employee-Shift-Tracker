@@ -17,6 +17,44 @@ class TestEmployee:
         e = Employee(id="1", first_name="Cher", last_name="")
         assert e.name == "Cher"
 
+    def test_short_name_basic(self):
+        e = Employee(id="1", first_name="Jane", last_name="Doe")
+        assert e.short_name == "Jane D."
+
+    def test_short_name_drops_middle(self):
+        # Middle names/initials live in first_name and must be dropped.
+        assert Employee(id="1", first_name="Emma M", last_name="Blais").short_name == "Emma B."
+        assert Employee(id="2", first_name="Taylor Lynn", last_name="Campbell").short_name == "Taylor C."
+        assert Employee(id="3", first_name="Tri Dund", last_name="Nguyen").short_name == "Tri N."
+
+    def test_short_name_two_taylors_stay_distinct(self):
+        a = Employee(id="1", first_name="Taylor Lynn", last_name="Campbell")
+        b = Employee(id="2", first_name="Taylor", last_name="Vachon")
+        assert a.short_name == "Taylor C." and b.short_name == "Taylor V."
+        assert a.short_name != b.short_name
+
+    def test_short_name_uppercases_initial(self):
+        assert Employee(id="1", first_name="jane", last_name="doe").short_name == "jane D."
+
+    def test_short_name_no_last(self):
+        assert Employee(id="1", first_name="Cher", last_name="").short_name == "Cher"
+
+    def test_short_name_no_first(self):
+        assert Employee(id="1", first_name="", last_name="Prince").short_name == "Prince"
+
+    def test_short_name_uses_preferred(self):
+        # "Kulbir" who goes by "Kevin" shows as "Kevin J." on the kiosk.
+        e = Employee(id="1", first_name="Kulbir K", last_name="Johal", preferred_name="Kevin")
+        assert e.short_name == "Kevin J."
+        assert e.name == "Kulbir K Johal"   # legal name unchanged
+
+    def test_preferred_name_defaults_empty(self):
+        assert Employee(id="1", first_name="A", last_name="B").preferred_name == ""
+
+    def test_blank_preferred_falls_back_to_first(self):
+        e = Employee(id="1", first_name="Jane", last_name="Doe", preferred_name="   ")
+        assert e.short_name == "Jane D."
+
     def test_defaults(self):
         e = Employee(id="1", first_name="A", last_name="B")
         assert e.active is True

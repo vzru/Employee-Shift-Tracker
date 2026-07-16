@@ -104,6 +104,32 @@
     </div>
   </section>
 
+  <!-- Clock safety buffer -->
+  <section class="rounded-xl border border-slate-200 bg-white p-5">
+    <h2 class="font-semibold text-slate-900">Clock in/out safety window</h2>
+    <p class="text-sm text-slate-500">
+      Forgives kiosk mis-taps within a short grace period. If someone is clocked out by mistake,
+      clocking them back in (same role) within the window re-opens and continues the original shift
+      instead of starting a new one. And if someone clocks in then right back out within the window,
+      the stray shift is removed rather than recorded.
+    </p>
+    <div class="mt-4 grid gap-4 sm:grid-cols-3">
+      <label class="flex items-center gap-2">
+        <input type="checkbox" name="clock_safety_enabled" {% if s.clock_safety.enabled %}checked{% endif %} class="rounded border-slate-300 text-indigo-600">
+        <span class="text-sm text-slate-700">Enable safety window</span>
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-slate-700">Grace period (minutes)</span>
+        <input type="number" name="clock_buffer_minutes" min="0" max="60" step="1" value="{{ s.clock_safety.buffer_minutes }}"
+               class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+        <span class="mt-1 block text-xs text-amber-600">
+          Keep this short (a few minutes). Any shift shorter than this is treated as a mis-tap and
+          removed when clocked out, so a large value would delete genuinely short shifts. Max 60.
+        </span>
+      </label>
+    </div>
+  </section>
+
   <!-- Roles & departments catalog -->
   <section class="rounded-xl border border-slate-200 bg-white p-5" x-data='catalogEditor({{ s.role_catalog | tojson }})'>
     <h2 class="font-semibold text-slate-900">Roles &amp; departments</h2>

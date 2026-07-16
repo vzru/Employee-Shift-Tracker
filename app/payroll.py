@@ -35,7 +35,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from . import repo
 from .models import Settings
-from .timeutil import hours_between, parse_iso, week_start_for
+from .timeutil import hours_between, now_local, parse_iso, week_start_for
 
 # Ontario ESA "three-hour rule": an employee who regularly works more than
 # three hours a day but is sent home early must still be paid at least three
@@ -84,6 +84,22 @@ class FlaggedShift:
 
 
 @dataclass
+class ShiftDetail:
+    """One worked (or open) shift, for the itemized timesheet section of the
+    export — lets the operator verify the totals shift by shift."""
+    date: str                    # YYYY-MM-DD of the clock-in
+    clock_in: str                # HH:MM
+    clock_out: str               # HH:MM, or "" if still open
+    role_title: str
+    department: str
+    raw_hours: float | None      # duration before the break deduction (None if open)
+    break_minutes: int           # unpaid break deducted
+    paid_hours: float | None     # hours after the break deduction (None if open)
+    rate: float                  # snapshotted hourly rate
+    flags: str                   # "; ".join of any per-shift flags
+
+
+@dataclass
 class PayrollRow:
     employee_id: str
     name: str
@@ -105,6 +121,8 @@ class PayrollRow:
     # The individual shifts behind the flags above (open / auto-closed / short),
     # so the preview can show details on demand.
     flagged_shifts: list[FlaggedShift] = field(default_factory=list)
+    # Every worked/open shift in range, for the itemized CSV timesheet section.
+    shift_details: list[ShiftDetail] = field(default_factory=list)
     # work-week-start -> [(clock_in, adjusted_hours, rate, role_title, department), ...]
     _week_shifts: dict[date, list[tuple]] = field(default_factory=dict)
 
@@ -175,14 +193,23 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
 
             shift_week = week_start_for(ci, wsw).isoformat()
 
+            role_title = shift.role_title or "(no role)"
+            department = shift.department or "(no department)"
+
             if shift.clock_out is None:
                 row.open_shift_count += 1  # flagged, never counted as hours
                 row.flagged_shifts.append(FlaggedShift(
                     reasons=["Open — no clock-out"],
-                    role_title=shift.role_title or "(no role)",
-                    department=shift.department or "(no department)",
+                    role_title=role_title, department=department,
                     clock_in=shift.clock_in, clock_out=None, hours=None,
                     week_start=shift_week,
+                ))
+                row.shift_details.append(ShiftDetail(
+                    date=ci.date().isoformat(), clock_in=ci.strftime("%H:%M"),
+                    clock_out="", role_title=role_title, department=department,
+                    raw_hours=None, break_minutes=0, paid_hours=None,
+                    rate=shift.hourly_rate if shift.hourly_rate is not None else 0.0,
+                    flags="Open — no clock-out",
                 ))
                 continue
 
@@ -202,8 +229,7 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
             if reasons:
                 row.flagged_shifts.append(FlaggedShift(
                     reasons=reasons,
-                    role_title=shift.role_title or "(no role)",
-                    department=shift.department or "(no department)",
+                    role_title=role_title, department=department,
                     clock_in=shift.clock_in, clock_out=shift.clock_out,
                     hours=round(duration, 2), week_start=shift_week,
                 ))
@@ -214,8 +240,15 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
             adjusted = max(0.0, duration - deduct / 60.0)
 
             rate = shift.hourly_rate if shift.hourly_rate is not None else 0.0
-            role_title = shift.role_title or "(no role)"
-            department = shift.department or "(no department)"
+
+            row.shift_details.append(ShiftDetail(
+                date=ci.date().isoformat(), clock_in=ci.strftime("%H:%M"),
+                clock_out=parse_iso(shift.clock_out).strftime("%H:%M"),
+                role_title=role_title, department=department,
+                raw_hours=round(duration, 2), break_minutes=deduct,
+                paid_hours=round(adjusted, 2), rate=rate,
+                flags="; ".join(reasons),
+            ))
 
             ws = week_start_for(ci, wsw)
             row._week_shifts.setdefault(ws, []).append(
@@ -232,6 +265,8 @@ def compute_payroll(start: date, end: date) -> list[PayrollRow]:
             ),
             key=lambda wh: wh.week_start,
         )
+        # Weeks iterate as an unordered set; sort the timesheet chronologically.
+        row.shift_details.sort(key=lambda d: (d.date, d.clock_in))
 
         # Money accumulates in Decimal; only the final row fields are floats.
         reg_pay = Decimal(0)
@@ -364,41 +399,85 @@ def row_to_dict(r: PayrollRow) -> dict:
     }
 
 
+def _row_flags(r: PayrollRow) -> str:
+    """Human-readable flag summary for one employee's main-table row."""
+    flags = []
+    if r.open_shift_count:
+        flags.append(f"{r.open_shift_count} OPEN SHIFT(S) EXCLUDED")
+    if r.auto_clocked_out_count:
+        flags.append(f"{r.auto_clocked_out_count} AUTO-CLOSED SHIFT(S) - VERIFY TIMES")
+    if r.short_shift_count:
+        flags.append(
+            f"{r.short_shift_count} SHIFT(S) UNDER {SHORT_SHIFT_HOURS:g}H - 3-HOUR RULE MAY APPLY"
+        )
+    if r.below_min_wage:
+        flags.append("A ROLE IS RATED BELOW MIN WAGE")
+    return "; ".join(flags)
+
+
 def to_csv(rows: list[PayrollRow], start: date, end: date) -> str:
-    """Render payroll rows to a CSV string."""
+    """Render payroll rows to a CSV string. Written with a UTF-8 BOM by the
+    caller so Excel opens accented names correctly."""
+    settings = repo.load_settings()
+    ot = settings.overtime
+    br = settings.break_rules
     buf = io.StringIO()
     writer = csv.writer(buf)
+
+    # --- Report header: what/when/assumptions, for the record ----------------
     writer.writerow([f"Payroll export {start.isoformat()} to {end.isoformat()}"])
+    writer.writerow([f"Generated {now_local().strftime('%Y-%m-%d %H:%M')}"])
     writer.writerow([
-        "Employee", "Regular Hours", "Overtime Hours",
-        "Regular Pay", "Overtime Pay", "Total Wages",
-        "Vacation Pay %", "Vacation Pay", "Flags",
+        "Rules: overtime "
+        + (f"{ot.multiplier:g}x after {ot.weekly_threshold:g} h/week"
+           if ot.enabled else "off")
+        + "; unpaid break "
+        + (f"{br.duration_minutes:g} min over {br.trigger_hours:g} h"
+           if br.enabled else "off")
+        + f"; minimum wage ${settings.min_wage.rate:.2f}"
     ])
+    writer.writerow([])
+
+    # --- Main per-employee summary -------------------------------------------
+    writer.writerow([
+        "Employee", "Regular Hours", "Overtime Hours", "Total Hours",
+        "Regular Pay", "Overtime Pay", "Total Wages",
+        "Vacation Pay %", "Vacation Pay", "Total Payable", "Shifts", "Flags",
+    ])
+    tot_reg_h = tot_ot_h = tot_reg_p = tot_ot_p = tot_wages = tot_vac = tot_shifts = 0.0
     for r in rows:
-        flags = []
-        if r.open_shift_count:
-            flags.append(f"{r.open_shift_count} OPEN SHIFT(S) EXCLUDED")
-        if r.auto_clocked_out_count:
-            flags.append(
-                f"{r.auto_clocked_out_count} AUTO-CLOSED SHIFT(S) - VERIFY TIMES"
-            )
-        if r.short_shift_count:
-            flags.append(
-                f"{r.short_shift_count} SHIFT(S) UNDER {SHORT_SHIFT_HOURS:g}H - 3-HOUR RULE MAY APPLY"
-            )
-        if r.below_min_wage:
-            flags.append("A ROLE IS RATED BELOW MIN WAGE")
+        total_hours = r.regular_hours + r.overtime_hours
+        total_payable = r.total_pay + r.vacation_pay
+        n_shifts = sum(1 for d in r.shift_details if d.paid_hours is not None)
+        tot_reg_h += r.regular_hours
+        tot_ot_h += r.overtime_hours
+        tot_reg_p += r.regular_pay
+        tot_ot_p += r.overtime_pay
+        tot_wages += r.total_pay
+        tot_vac += r.vacation_pay
+        tot_shifts += n_shifts
         writer.writerow([
             r.name,
             f"{r.regular_hours:.2f}",
             f"{r.overtime_hours:.2f}",
+            f"{total_hours:.2f}",
             f"{r.regular_pay:.2f}",
             f"{r.overtime_pay:.2f}",
             f"{r.total_pay:.2f}",
             f"{r.vacation_pay_percent:g}",
             f"{r.vacation_pay:.2f}",
-            "; ".join(flags),
+            f"{total_payable:.2f}",
+            n_shifts,
+            _row_flags(r),
         ])
+    # Grand totals across everyone, for reconciliation.
+    writer.writerow([
+        "TOTAL",
+        f"{tot_reg_h:.2f}", f"{tot_ot_h:.2f}", f"{tot_reg_h + tot_ot_h:.2f}",
+        f"{tot_reg_p:.2f}", f"{tot_ot_p:.2f}", f"{tot_wages:.2f}",
+        "", f"{tot_vac:.2f}", f"{tot_wages + tot_vac:.2f}", f"{tot_shifts:g}", "",
+    ])
+
     writer.writerow([])
     writer.writerow(["Weekly hours by employee"])
     writer.writerow(["Employee", "Week starting", "Hours"])
@@ -412,6 +491,25 @@ def to_csv(rows: list[PayrollRow], start: date, end: date) -> str:
     for r in rows:
         for rp in r.role_pay:
             writer.writerow([r.name, rp.department, rp.role_title, f"{rp.hours:.2f}", f"{rp.pay:.2f}"])
+
+    # --- Itemized timesheet: every shift, to verify the totals ---------------
+    writer.writerow([])
+    writer.writerow(["Itemized shifts"])
+    writer.writerow([
+        "Employee", "Date", "Clock in", "Clock out", "Department", "Role",
+        "Raw Hours", "Break (min)", "Paid Hours", "Rate", "Flags",
+    ])
+    for r in rows:
+        for d in r.shift_details:
+            writer.writerow([
+                r.name, d.date, d.clock_in, d.clock_out or "—",
+                d.department, d.role_title,
+                f"{d.raw_hours:.2f}" if d.raw_hours is not None else "—",
+                d.break_minutes,
+                f"{d.paid_hours:.2f}" if d.paid_hours is not None else "—",
+                f"{d.rate:.2f}",
+                d.flags,
+            ])
 
     writer.writerow([])
     writer.writerow([

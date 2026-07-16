@@ -26,10 +26,13 @@ in Restaurant). "active": false means the employee is HIDDEN from the kiosk
 but kept here for the record (employees are deactivated, never deleted, so
 historical shifts always resolve to a name). "vacation_pay_percent" is that
 employee's vacation pay accrual rate (Ontario ESA minimum 4%; 6% once they
-reach 5 years of service), used by the payroll export.
+reach 5 years of service), used by the payroll export. "preferred_name" is
+optional; when set it replaces the first name on the kiosk display (the legal
+first/last are still kept for records and payroll).
     [
       {
-        "id": "a1b2c3d4e5f6", "first_name": "Jane", "last_name": "Doe", "active": true,
+        "id": "a1b2c3d4e5f6", "first_name": "Jane", "last_name": "Doe",
+        "preferred_name": "", "active": true,
         "vacation_pay_percent": 4.0,
         "roles": [
           { "id": "r1", "title": "Cashier", "department": "Bowling", "hourly_rate": 17.6 },
@@ -40,8 +43,9 @@ reach 5 years of service), used by the payroll export.
 
 ### admin.json
 The admin password hash (bcrypt - never plaintext) and the payroll settings
-(break deduction, overtime, minimum wage). Do not edit the hash by hand; reset
-the password with:  EmployeeShiftTracker.exe --reset-admin
+(break deduction, overtime, minimum wage, automatic clock-out, and the clock
+in/out safety window that forgives kiosk mis-taps). Do not edit the hash by
+hand; reset the password with:  EmployeeShiftTracker.exe --reset-admin
 
 ### secret.json
 A random key used to sign the admin login session cookie for THIS installation.

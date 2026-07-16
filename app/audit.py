@@ -8,7 +8,7 @@ the whole-file atomic rewrite used for payroll data. Open it directly in a
 text editor if you need to review it.
 
 Logged actions: employee_added, employee_modified, employee_deactivated,
-employee_activated, shift_edited, shift_voided, shift_unvoided,
+employee_activated, shift_added, shift_edited, shift_voided, shift_unvoided,
 shift_auto_clocked_out, clock_in, clock_out.
 """
 

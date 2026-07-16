@@ -38,6 +38,10 @@ class Employee(BaseModel):
     id: str                       # stable opaque id (uuid4 hex, short)
     first_name: str                # stored ONLY in employees.json
     last_name: str                 # stored ONLY in employees.json
+    # Optional name the employee goes by; when set it replaces the first name
+    # on the kiosk (see short_name). The legal first/last are still kept for
+    # records/payroll.
+    preferred_name: str = ""
     active: bool = True           # inactive employees hide from the kiosk
     roles: list[Role] = Field(default_factory=list)
     # Vacation pay accrual rate, percent of gross wages. Ontario ESA minimum is
@@ -47,8 +51,21 @@ class Employee(BaseModel):
 
     @property
     def name(self) -> str:
-        """Full display name, e.g. for the kiosk grid and payroll rows."""
+        """Full display name, e.g. for payroll rows, the admin panel, audit."""
         return f"{self.first_name} {self.last_name}".strip()
+
+    @property
+    def short_name(self) -> str:
+        """First name + last initial for the public kiosk, dropping any middle
+        names/initials (which live in first_name, e.g. "Emma M" -> "Emma B.").
+        A preferred_name, when set, replaces the derived first name
+        ("Kulbir" who goes by "Kevin" -> "Kevin J."). Falls back gracefully
+        when a name part is missing."""
+        given = self.preferred_name.strip() or (self.first_name.strip().split() or [""])[0]
+        last = self.last_name.strip()
+        if given and last:
+            return f"{given} {last[0].upper()}."
+        return given or last
 
 
 class Shift(BaseModel):
@@ -118,11 +135,25 @@ class AutoClockoutSettings(BaseModel):
     threshold_hours: float = 24.0
 
 
+class ClockSafetySettings(BaseModel):
+    """Grace window for correcting kiosk mis-taps. Within ``buffer_minutes`` of
+    the relevant event:
+      * clocking an employee back IN re-opens the shift they just clocked out
+        of (same role) instead of starting a new one — undoes an accidental
+        clock-out and continues the original shift.
+      * clocking OUT right after clocking in removes the just-opened shift
+        entirely — undoes an accidental clock-in so no stray shift is recorded.
+    """
+    enabled: bool = True
+    buffer_minutes: int = 15
+
+
 class Settings(BaseModel):
     break_rules: BreakSettings = Field(default_factory=BreakSettings)
     overtime: OvertimeSettings = Field(default_factory=OvertimeSettings)
     min_wage: MinWageSettings = Field(default_factory=MinWageSettings)
     auto_clockout: AutoClockoutSettings = Field(default_factory=AutoClockoutSettings)
+    clock_safety: ClockSafetySettings = Field(default_factory=ClockSafetySettings)
     # Master list of departments -> valid role titles within them, maintained
     # in Admin > Settings. Populates the department/title dropdowns when
     # assigning roles to an employee (app/templates/admin_employees.html), so

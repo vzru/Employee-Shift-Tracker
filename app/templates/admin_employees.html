@@ -27,6 +27,12 @@
              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
     </label>
     <label class="block">
+      <span class="text-sm font-medium text-slate-700">Preferred name</span>
+      <input type="text" name="preferred_name" placeholder="optional"
+             class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
+      <span class="mt-1 block text-xs text-slate-400">Shown on the kiosk instead of the first name.</span>
+    </label>
+    <label class="block">
       <span class="text-sm font-medium text-slate-700">Vacation pay %</span>
       <input type="number" name="vacation_pay_percent" value="4" min="0" step="0.5"
              class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 focus:border-indigo-500 focus:ring-indigo-500">
@@ -91,7 +97,10 @@
       {% for e in employees %}
       <tr x-data='{ editing: false, ...rolesEditor({{ e.roles | tojson }}, {{ role_catalog | tojson }}) }'>
         <!-- Display cells (hidden while editing; the edit form spans the row) -->
-        <td class="px-4 py-3 font-medium text-slate-900 align-top" x-show="!editing">{{ e.name }}</td>
+        <td class="px-4 py-3 font-medium text-slate-900 align-top" x-show="!editing">
+          {{ e.name }}
+          <span class="block text-xs font-normal text-slate-400">kiosk: {{ e.short_name }}</span>
+        </td>
         <td class="px-4 py-3" x-show="!editing">
           <ul class="space-y-0.5">
             {% for role in e.roles %}
@@ -143,6 +152,11 @@
             <label class="block">
               <span class="text-xs font-medium text-slate-500">Last name</span>
               <input type="text" name="last_name" value="{{ e.last_name }}" required
+                     class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
+            </label>
+            <label class="block">
+              <span class="text-xs font-medium text-slate-500">Preferred name</span>
+              <input type="text" name="preferred_name" value="{{ e.preferred_name }}" placeholder="optional"
                      class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2">
             </label>
             <label class="block">
